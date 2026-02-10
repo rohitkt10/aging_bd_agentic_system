@@ -5,9 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aging-bd-agentic-system"
 version = "0.1.0"
-description = "Agentic system for aging BD."
+description = "Agentic system for aging BD gene list discovery."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
+dependencies = [
+    "biopython>=1.84",
+    "python-dotenv>=1.0.0",
+    "sentence-transformers>=2.2.0",
+    "faiss-cpu>=1.7.4",
+    "numpy>=1.26.0",
+    "tqdm>=4.66.0",
+]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
@@ -20,7 +28,7 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

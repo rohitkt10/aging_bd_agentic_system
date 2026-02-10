@@ -55,14 +55,20 @@ Thumbs.db
 # Logs
 *.log
 
-# ML/AI artifacts
+# ML/AI artifacts and data 
 models/
 checkpoints/
 artifacts/
 outputs/
 wandb/
 mlruns/
+logs/
+data/
 
 # misc 
 docs/
 AGENTS.md 
+CHANGELOG_INTERNAL.md 
+
+# slurm scripts 
+corpus_setup.sh 

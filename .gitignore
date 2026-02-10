@@ -1,0 +1,68 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+build/
+dist/
+pip-wheel-metadata/
+
+# Virtual environments
+.env
+.env.*
+venv/
+.venv/
+ENV/
+env/
+virtualenv/
+.python-version
+
+# Packaging/installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Test/coverage artifacts
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+nosetests.xml
+test-reports/
+.hypothesis/
+
+# Type checker/linter caches
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Jupyter/Notebook
+.ipynb_checkpoints/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# ML/AI artifacts
+models/
+checkpoints/
+artifacts/
+outputs/
+wandb/
+mlruns/
+
+# misc 
+docs/
+AGENTS.md 

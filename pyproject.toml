@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aging-bd-agentic-system"
+version = "0.1.0"
+description = "Agentic system for aging BD."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

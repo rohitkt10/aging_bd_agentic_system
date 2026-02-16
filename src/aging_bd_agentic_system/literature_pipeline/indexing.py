@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from pdb import set_trace 
+
 import faiss
 import numpy as np
 
@@ -32,11 +32,16 @@ def load_chunks(jsonl_path: Path) -> tuple[list[str], list[dict[str, Any]]]:
             try:
                 record = json.loads(line)
             except json.JSONDecodeError:
-                print(f"Warning: Skipping invalid JSON at line {line_num}", file=sys.stderr)
+                print(
+                    f"Warning: Skipping invalid JSON at line {line_num}",
+                    file=sys.stderr,
+                )
                 continue
 
             if "text" not in record:
-                raise ValueError(f"Record at line {line_num} missing required 'text' field.")
+                raise ValueError(
+                    f"Record at line {line_num} missing required 'text' field."
+                )
 
             texts.append(record["text"])
             metas.append(record)
@@ -101,14 +106,16 @@ def build_faiss_index_from_chunks(
         raise ValueError("Only cosine similarity is supported.")
 
     if not force and (out_dir / "faiss.index").exists():
-        raise ValueError(f"Index already exists in {out_dir}. Use --force to overwrite.")
+        raise ValueError(
+            f"Index already exists in {out_dir}. Use --force to overwrite."
+        )
 
     print(f"Loading chunks from {chunks_path}...")
     texts, metas = load_chunks(chunks_path)
 
     if not texts:
         raise ValueError("No chunks found.")
-    
+
     print(f"Embedding {len(texts)} chunks (model={model_id})...")
     embeddings = embed_texts(
         texts,

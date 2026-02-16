@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv  # type: ignore
+
 # Resolve repo root:
 # <repo>/src/aging_bd_agentic_system/literature_pipeline/config.py -> <repo>
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Explicitly load .env from repo root
-from dotenv import load_dotenv  # type: ignore
 load_dotenv(REPO_ROOT / ".env")
 
 # Data directories
@@ -18,7 +19,7 @@ CHUNKS_DIR = DATA_DIR / "corpus" / "chunks"
 
 # Artifacts
 ARTIFACTS_DIR = REPO_ROOT / "artifacts"
-#INDEX_DIR = ARTIFACTS_DIR / "index"
+# INDEX_DIR = ARTIFACTS_DIR / "index"
 INDEX_DIR = DATA_DIR / "corpus" / "index"
 
 # Chunking

@@ -1,13 +1,13 @@
 .PHONY: sync test lint fmt
 
 sync:
-uv sync
+	uv sync
 
 test:
-uv run pytest
+	uv run pytest
 
 lint:
-uv run ruff check .
+	uv run ruff check .
 
 fmt:
-uv run ruff format .
+	uv run ruff format .

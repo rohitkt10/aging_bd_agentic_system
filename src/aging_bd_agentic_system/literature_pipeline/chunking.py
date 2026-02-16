@@ -219,7 +219,9 @@ def build_chunks_dataset(
         "chunk_size": chunk_size_words,
         "overlap": overlap_words,
         "min_words": min_words,
-        "manifest_used": str(manifest_path) if manifest_path and manifest_path.exists() else None,
+        "manifest_used": (
+            str(manifest_path) if manifest_path and manifest_path.exists() else None
+        ),
     }
 
     global_chunk_id = 0

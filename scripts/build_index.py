@@ -2,11 +2,14 @@
 
 import argparse
 from pathlib import Path
+
 import torch
+
 from aging_bd_agentic_system.literature_pipeline import config
 from aging_bd_agentic_system.literature_pipeline.indexing import (
     build_faiss_index_from_chunks,
 )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()

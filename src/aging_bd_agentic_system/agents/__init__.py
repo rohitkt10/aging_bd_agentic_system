@@ -12,7 +12,6 @@ from aging_bd_agentic_system.agents.phase2_gene_researcher import (
     phase2_critic,
     phase2_refine,
     phase2_research,
-    seed_gene_candidates,
     select_bp,
 )
 
@@ -28,6 +27,5 @@ __all__ = [
     "phase2_critic",
     "phase2_refine",
     "phase2_research",
-    "seed_gene_candidates",
     "select_bp",
 ]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from langgraph.graph import END, StateGraph
 
@@ -18,13 +18,12 @@ from aging_bd_agentic_system.agents.phase2_gene_researcher import (
     phase2_critic,
     phase2_refine,
     phase2_research,
-    seed_gene_candidates,
     select_bp,
 )
 from aging_bd_agentic_system.graph.state import ResearchState
 
 
-def phase1_route(state: Dict[str, Any]) -> str:
+def phase1_route(state: dict[str, Any]) -> str:
     """Route Phase 1 critique results to refine or finalize."""
     eval_data = state.get("phase1_eval", {})
     iteration = state.get("phase1_iteration", 0)
@@ -33,7 +32,7 @@ def phase1_route(state: Dict[str, Any]) -> str:
     return "phase1_finalize"
 
 
-def phase2_route(state: Dict[str, Any]) -> str:
+def phase2_route(state: dict[str, Any]) -> str:
     """Route Phase 2 critique results to refine or GO term mapping."""
     eval_data = state.get("phase2_eval", {})
     iteration = state.get("phase2_iteration", 0)
@@ -42,7 +41,21 @@ def phase2_route(state: Dict[str, Any]) -> str:
     return "map_go_terms"
 
 
-def bp_loop_route(state: Dict[str, Any]) -> str:
+def phase2_research_route(state: dict[str, Any]) -> str:
+    """Route Phase 2 research results: continue loop or go to critic."""
+    import os
+
+    iteration = state.get("phase2_research_iteration", 0)
+    max_iterations = int(os.environ.get("PHASE2_RESEARCH_MAX_ITERATIONS", "7"))
+
+    # If we haven't reached max iterations, continue research loop
+    if iteration < max_iterations:
+        return "phase2_research"
+    # Otherwise, move to critic
+    return "phase2_critic"
+
+
+def bp_loop_route(state: dict[str, Any]) -> str:
     """Loop over BPs or exit when the queue is exhausted."""
     index = state.get("current_bp_index", 0)
     queue = state.get("bp_queue", [])
@@ -79,7 +92,6 @@ def build_phase2_graph() -> StateGraph:
     """Build Phase 2 subgraph for per-BP gene research."""
     builder: StateGraph = StateGraph(ResearchState)
     builder.add_node("select_bp", select_bp)
-    builder.add_node("seed_gene_candidates", seed_gene_candidates)
     builder.add_node("phase2_research", phase2_research)
     builder.add_node("phase2_critic", phase2_critic)
     builder.add_node("phase2_refine", phase2_refine)
@@ -87,9 +99,13 @@ def build_phase2_graph() -> StateGraph:
     builder.add_node("advance_bp", advance_bp)
 
     builder.set_entry_point("select_bp")
-    builder.add_edge("select_bp", "seed_gene_candidates")
-    builder.add_edge("seed_gene_candidates", "phase2_research")
-    builder.add_edge("phase2_research", "phase2_critic")
+    builder.add_edge("select_bp", "phase2_research")
+    # Add conditional edge for research loop (continues until max iterations reached)
+    builder.add_conditional_edges(
+        "phase2_research",
+        phase2_research_route,
+        {"phase2_research": "phase2_research", "phase2_critic": "phase2_critic"},
+    )
     builder.add_conditional_edges(
         "phase2_critic",
         phase2_route,
@@ -117,3 +133,28 @@ def build_workflow() -> StateGraph:
     builder.add_edge("phase2", END)
 
     return builder.compile()
+
+
+def run_workflow(
+    initial_state: dict[str, Any],
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Run the aging BD gene discovery workflow.
+
+    Args:
+        initial_state: Initial state with hallmark_name.
+        config: Optional config dict with callbacks and other settings.
+
+    Returns:
+        Final state after workflow completion.
+    """
+    graph = build_workflow()
+
+    if config is None:
+        config = {}
+
+    # Invoke graph with config
+    result = graph.invoke(initial_state, config=config)
+
+    return result

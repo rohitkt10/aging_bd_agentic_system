@@ -38,6 +38,7 @@ class ResearchState(TypedDict):
     current_bp_index: int
     current_bp_name: str
     phase2_iteration: int
+    phase2_research_iteration: int
     phase2_eval: Dict[str, Any]
 
     # Phase 2 outputs (accumulated across all BPs)

@@ -1,284 +1,194 @@
-# Phase 3 — Outputs + Quality Gates (Detailed Implementation)
+# Phase 3 — Observability
 
-**Goal:** Convert raw graph state into deterministic, validated outputs and enforce PRD constraints. This phase makes results reproducible, auditable, and consumable downstream.
+**Goal:** Integrate LangGraph callback-based tracing for automatic LLM and tool call capture with unified logging directory.
 
----
-
-## 3.0 Scope and Responsibilities
-
-Phase 3 is responsible for:
-
-1. **Aggregation:** Deduplicate and sort gene and GO-term outputs deterministically.
-2. **Validation:** Enforce PRD constraints and report issues without crashing.
-3. **Context control:** Summarize state when exceeding token budgets.
-4. **Output writing:** Persist canonical TSV artifacts.
-
-Non‑goals:
-- Do not alter Phase 1/2 research logic.
-- Do not change tool interfaces.
-- Do not add new dependencies without updating `pyproject.toml`.
+**Note:** Phase 3 is complete. This plan documents the final unified logging structure.
 
 ---
 
-## 3.1 Files to Create
+## 3.1 Logging Architecture
 
+**Unified Directory Structure:**
 ```
-src/aging_bd_agentic_system/utils/validation.py
-src/aging_bd_agentic_system/utils/aggregation.py
-src/aging_bd_agentic_system/utils/context_manager.py
+<project_root>/
+├── logs/
+│   └── {hallmark}/                      # e.g., "epigenetic_alterations"
+│       ├── trace_{timestamp}.jsonl      # Tier 1: Per-call traces
+│       ├── trace_{timestamp}.json       # Tier 1: Complete summary
+│       └── audit.jsonl                  # Tier 2: Major events
+├── outputs/                             # Unchanged
+│   └── {hallmark}/
+│       ├── biological_processes.tsv
+│       ├── curated_genes.tsv
+│       ├── curated_go_terms.tsv
+│       └── full_state.json
 ```
 
-If `main.py` already writes outputs, update it to call these utilities.
+**Two-Tier Logging:**
+- **Tier 1:** `TracingCallbackHandler` captures every LLM call, tool call, node transition
+- **Tier 2:** `audit_logger` captures BP completion, workflow completion, scratchpad dumps
+
+**Benefits:**
+- All logs for a hallmark in one directory
+- Easy to find/analyze logs for specific hallmark
+- Separate files for easy filtering by granularity
+- Can trace full execution by sorting both JSONL files by timestamp
 
 ---
 
-## 3.2 Validation Module — `utils/validation.py`
+## 3.2 Tracing Module (Implemented)
 
-### 3.2.1 Function: `validate_phase1(biological_processes) -> dict`
+**File:** `src/aging_bd_agentic_system/observability/tracing.py`
 
-**Input contract:** list of dicts with keys:
-- `rank: int`
-- `process_name: str`
-- `evidence_score: int`
-- `evidence_summary: str`
-- `sources: list[str]`
+**Status:** ✅ Complete
 
-**Checks:**
-- Count in [10, 15]
-- Each entry has all required keys
-- `evidence_score` is int in [1, 10]
-- `sources` length >= 1
-- `evidence_summary` is non‑empty
-- `process_name` is non‑empty
+**What it provides:**
+- `TracingCallbackHandler` - LangGraph callback handler (accepts `hallmark_name`)
+- `create_tracing_callback(log_dir, hallmark_name)` - Factory function
+- `setup_logging(level)` - Application logging configuration
 
-**Return:**
+**What it logs:**
+- Every LLM call (start/end, model, prompt preview, response preview)
+- Every tool call (start/end, tool name, args, results)
+- Chain/node execution (start/end)
+- Errors
+
+**Where logs go:** `logs/{hallmark}/trace_{timestamp}.jsonl` (incremental) + `trace_{timestamp}.json` (summary)
+
+---
+
+## 3.3 Audit Logger (Implemented)
+
+**File:** `src/aging_bd_agentic_system/utils/audit_logger.py`
+
+**Status:** ✅ Complete
+
+**What it logs:**
+- `bp_research_complete` - BP completion with scratchpad snapshot
+- `workflow_complete` - Workflow completion with summary
+
+**Where logs go:** `logs/{hallmark}/audit.jsonl`
+
+**Integration:** ✅ Complete
+- Called in `advance_bp()` at BP completion (phase2_gene_researcher.py:539-546)
+- Called in `main.py` at workflow completion (main.py:88-96)
+
+---
+
+## 3.4 Main Entry Point (Implemented)
+
+**File:** `src/aging_bd_agentic_system/main.py`
+
+**Status:** ✅ Complete
+
+**Key integration:**
 ```python
-{"passed": bool, "issues": list[str]}
+# Create tracing callback with hallmark name
+tracing_handler = create_tracing_callback(hallmark_name=args.hallmark)
+
+# Invoke workflow with tracing callback
+result = graph.invoke(state, config={"callbacks": [tracing_handler]})
 ```
 
-**Issue examples:**
-- `"expected 10–15 processes, got 7"`
-- `"process[3] missing sources"`
-- `"process[4] evidence_score not in 1–10"`
+**Also does:**
+- Writes full state to `outputs/{hallmark}/full_state.json` (lines 83-85)
+- Logs workflow completion via audit_logger (lines 88-96)
+- Writes TSV deliverables (lines 77-80)
 
 ---
 
-### 3.2.2 Function: `validate_phase2(genes, go_terms) -> dict`
+## 3.5 Verify Tracing Works
 
-**Input contracts:**
-- **genes** entries require:
-  - `gene_symbol: str`
-  - `score: int`
-  - `biological_process: str`
-  - `evidence_summary: str`
-  - `sources: list[str]`
-- **go_terms** entries require:
-  - `go_id: str`
-  - `go_label: str`
-  - `definition: str`
-  - `biological_process: str | list[str]`
+**Quick test:** Run a hallmark and check trace files are created
 
-**Checks (genes):**
-- 300–500 genes (overall total)
-- `score` in [1, 10]
-- `evidence_summary` not empty
-- `sources` length >= 1
+```bash
+# Run workflow
+python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
 
-**Checks (GO terms):**
-- 50–80 GO terms (overall total)
-- `go_id` starts with `GO:`
-- `go_label` and `definition` non‑empty
+# Check unified log directory
+ls -la logs/epigenetic_alterations/
 
-**Return:**
-```python
-{"passed": bool, "issues": list[str]}
+# Check trace content
+head -20 logs/epigenetic_alterations/trace_*.jsonl
+
+# Check audit content
+cat logs/epigenetic_alterations/audit.jsonl | jq -r '.event_type'
 ```
 
----
-
-### 3.2.3 Function: `validate_all(bps, genes, go_terms) -> dict`
-
-- Calls `validate_phase1` and `validate_phase2`.
-- Returns a single dict with `passed` and a **flattened** `issues` list.
-- `passed` is true only if both validators pass.
-
-**Non‑fatal requirement:**
-- Validation **must not** crash the run; issues are logged and outputs still written.
-
-**Pseudo‑implementation:**
-```python
-issues = []
-issues += validate_phase1(bps)["issues"]
-issues += validate_phase2(genes, go_terms)["issues"]
-return {"passed": len(issues) == 0, "issues": issues}
+**Expected output:**
+```
+logs/epigenetic_alterations/
+├── trace_20250219_120000.jsonl    # Per-call traces
+├── trace_20250219_120000.json     # Complete summary
+└── audit.jsonl                    # Major events
 ```
 
 ---
 
-## 3.3 Aggregation Module — `utils/aggregation.py`
+## Phase 3 Completion Checklist
 
-### 3.3.1 Function: `dedupe_genes(genes) -> list`
-
-**Rules:**
-- Deduplicate by `gene_symbol`.
-- Keep entry with highest `score`.
-- If scores equal, keep the entry with the longer `evidence_summary`.
-- Preserve the `biological_process` of the retained entry (do not merge BPs here).
-
-**Rationale:**
-- The evidence score is the primary ranking signal.
-- Longer summary usually contains more citations.
+- [x] `observability/tracing.py` exists with `TracingCallbackHandler` ✅
+- [x] `TracingCallbackHandler` accepts `hallmark_name` parameter ✅
+- [x] `create_tracing_callback()` accepts `hallmark_name` parameter ✅
+- [x] `utils/audit_logger.py` uses `logs/{hallmark}/audit.jsonl` ✅
+- [x] Two-tier logging in unified directory ✅
+  - [x] Per-call traces in `logs/{hallmark}/trace_{timestamp}.jsonl`
+  - [x] Major events in `logs/{hallmark}/audit.jsonl`
+- [x] `advance_bp()` calls audit_logger at BP completion ✅
+- [x] `main.py` calls audit_logger at workflow completion ✅
+- [x] `main.py` writes full state to `outputs/{hallmark}/full_state.json` ✅
+- [x] `main.py` passes hallmark_name to tracing callback ✅
+- [x] Deliverables written to `outputs/{hallmark}/*.tsv` ✅
+- [x] All tests passing ✅
 
 ---
 
-### 3.3.2 Function: `merge_go_terms(go_terms) -> list`
+## Trace File Format
 
-**Rules:**
-- Deduplicate by `go_id`.
-- Preserve all `biological_process` values in a list if term repeats.
-- Keep the longest `definition` when merging duplicates.
+**Tier 1 (trace) events:**
+```json
+{"timestamp": "2025-02-19T14:30:23.123456", "event_type": "llm_start", "run_id": "...", "model": "gemini-2.0-flash-...", "prompt_preview": "...", "current_node": "phase1_research"}
+```
 
-**Example merge:**
-```python
-{
-  "go_id": "GO:0006915",
-  "go_label": "apoptotic process",
-  "definition": "...",
-  "biological_process": ["DNA damage", "cell death"]
-}
+**Tier 2 (audit) events:**
+```json
+{"timestamp": "2025-02-19T14:35:12", "hallmark": "epigenetic_alterations", "event_type": "bp_research_complete", "bp_name": "DNA methylation", "genes_count": 25, "research_scratchpad": "..."}
+```
+
+**Event types captured:**
+- `chain_start` / `chain_end` / `chain_error` - Graph execution
+- `llm_start` / `llm_end` / `llm_error` - LLM calls
+- `tool_start` / `tool_end` / `tool_error` - Tool calls
+- `bp_research_complete` - BP completion
+- `workflow_complete` - Workflow completion
+
+---
+
+## How to Trace Execution Sequence
+
+**All logs in one place:** `logs/{hallmark}/`
+
+1. **Per-call traces** (Tier 1): `logs/{hallmark}/trace_{timestamp}.jsonl`
+   - Every LLM call with timing
+   - Every tool call with timing
+   - Node transitions
+
+2. **Major events** (Tier 2): `logs/{hallmark}/audit.jsonl`
+   - BP research completion events
+   - Workflow completion event
+
+3. **Full state**: `outputs/{hallmark}/full_state.json`
+   - Complete workflow state
+   - All genes, GO terms, biological processes
+
+**To trace full execution:**
+```bash
+# Combine both logs and sort by timestamp
+jq -s 'sort_by(.timestamp)' logs/{hallmark}/*.jsonl
 ```
 
 ---
 
-### 3.3.3 Function: `sort_genes(genes) -> list`
+## Next Phase
 
-- Sort by `score` desc, then `gene_symbol` asc.
-- Sorting must be stable to keep deterministic ordering.
-
----
-
-### 3.3.4 Function: `aggregate_outputs(genes, go_terms) -> tuple`
-
-- Returns `(genes_deduped_sorted, go_terms_deduped)`.
-- Apply `dedupe_genes` → `sort_genes` for genes.
-- Apply `merge_go_terms` for GO terms.
-
----
-
-## 3.4 Context Manager — `utils/context_manager.py`
-
-### 3.4.1 Function: `estimate_tokens(text) -> int`
-- Approximate: `len(text.split())`.
-
-### 3.4.2 Function: `summarize_if_needed(state, max_tokens=50000) -> dict`
-
-**Steps:**
-1. Build a single text blob from:
-   - `tool_call_history`
-   - `reasoning_trace`
-   - `research_scratchpad`
-2. Estimate tokens.
-3. If tokens <= max_tokens, return `{}`.
-4. Else summarize via LLM (short summary of evidence + decisions).
-5. Return:
-```python
-{
-  "context_summary": summary,
-  "tool_call_history": [],
-  "reasoning_trace": [],
-  "research_scratchpad": ""
-}
-```
-
-**Persistence requirement:**
-- Raw tool evidence must still be persisted in log files (Phase 4), even if removed from state.
-
-**Trigger points (recommended):**
-- After each Phase 2 BP loop.
-- After each critique/refine cycle.
-- Before final aggregation.
-
----
-
-## 3.5 Output Writers (Add to `main.py` or new `utils/output_writer.py`)
-
-### 3.5.1 Processes TSV
-
-**File:** `outputs/{hallmark}/processes.tsv`
-**Columns (tab‑separated):**
-```
-rankprocess_nameevidence_scoreevidence_summarysources
-```
-
-**Rules:**
-- `rank` is 1‑indexed after sorting by evidence score.
-- `sources` serialized as `;`‑joined strings.
-- Always write header row.
-
----
-
-### 3.5.2 Genes TSV
-
-**File:** `outputs/{hallmark}/genes.tsv`
-**Columns (tab‑separated):**
-```
-rankgene_symbolscorebiological_processevidence_summarysources
-```
-
-**Rules:**
-- `rank` assigned after sorting/deduping.
-- `biological_process` is the BP label used when the gene was scored.
-- `sources` serialized as `;`‑joined strings.
-
----
-
-### 3.5.3 GO Terms TSV
-
-**File:** `outputs/{hallmark}/go_terms.tsv`
-**Columns (tab‑separated):**
-```
-go_idgo_labelbiological_processdefinitionsources
-```
-
-**Rules:**
-- If `biological_process` is a list, serialize with `;`.
-- `sources` serialized as `;`‑joined strings.
-
----
-
-### 3.5.4 Writer Utilities (Optional)
-
-If output writing becomes large, add helpers:
-- `ensure_output_dir(hallmark_name)`
-- `serialize_sources(sources: list[str]) -> str`
-- `write_tsv(path, header, rows)`
-
----
-
-## 3.6 Wire Validation into Workflow
-
-After graph execution:
-1. Call `aggregate_outputs(genes_found, go_terms_found)`.
-2. Run `validate_all(bps, genes, go_terms)`.
-3. If `passed == False`, log issues and still write outputs.
-
-**Ordering matters:**
-- Always aggregate before validating and writing to ensure deterministic outputs.
-
----
-
-## 3.7 Edge Cases and Handling
-
-- **Empty outputs:** validation should report a clear issue and still write TSV headers.
-- **Duplicate genes across BPs:** dedupe retains highest score.
-- **Duplicate GO terms across BPs:** merge with BP list.
-- **Invalid scores:** report in validation, do not coerce silently.
-
----
-
-## 3.8 Acceptance Criteria
-
-- TSV outputs are generated for one hallmark.
-- Validation reports are produced and logged.
-- Aggregation + dedupe are deterministic.
-- Output schema matches PRD requirements.
+After Phase 3 complete, proceed to **Phase 4 — Integration & Validation**, where we'll run end-to-end tests and validate the complete workflow.

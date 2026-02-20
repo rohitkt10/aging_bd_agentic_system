@@ -9,18 +9,21 @@ description = "Agentic system for aging BD gene list discovery."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "biopython>=1.84",
-    "langgraph>=0.2.0",
-    "pydantic>=2.0.0",
-    "python-dotenv>=1.0.0",
-    "sentence-transformers>=2.2.0",
-    "faiss-cpu>=1.7.4",
-    "numpy>=1.26.0",
-    "tqdm>=4.66.0",
+    "biopython==1.86",
+    "faiss-cpu==1.13.2",
+    "google-genai==1.23.0",
+    "langchain-core==1.2.13",
+    "langchain-google-vertexai==3.0.0",
+    "langgraph==1.0.9",
+    "numpy==1.26.4",
+    "pydantic==2.12.5",
+    "python-dotenv==1.2.1",
+    "sentence-transformers==5.2.2",
+    "tqdm==4.67.3",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest==9.0.2", "ruff==0.9.9"]
 
 [tool.setuptools]
 package-dir = { "" = "src" }

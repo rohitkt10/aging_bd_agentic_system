@@ -6,9 +6,10 @@ from aging_bd_agentic_system.agents.phase1_bp_identifier import phase1_finalize
 from aging_bd_agentic_system.agents.phase2_gene_researcher import (
     advance_bp,
     phase2_critic,
-    seed_gene_candidates,
     select_bp,
 )
+from aging_bd_agentic_system.llm import get_llm, reset_llm
+from aging_bd_agentic_system.llm.testing import FakeLLMProvider
 
 
 def test_phase1_finalize_ranks_and_queue() -> None:
@@ -48,29 +49,43 @@ def test_select_bp_and_advance() -> None:
     assert advance_updates["current_bp_name"] == ""
 
 
-def test_seed_gene_candidates_genage_only() -> None:
-    state = {"current_bp_name": "TP53"}
-    updates = seed_gene_candidates(state, include_opengenes=False)
-    candidates = json.loads(updates["research_scratchpad"])
-    assert "TP53" in candidates
-
-
 def test_phase2_critic_pass_and_fail() -> None:
-    state = {
-        "current_bp_name": "DNA repair",
-        "genes_found": [
-            {
-                "gene_symbol": "TP53",
-                "score": 8,
-                "biological_process": "DNA repair",
-                "evidence_summary": "PMID:123",
-                "sources": ["PMID:123"],
-            }
-        ],
-    }
+    # Use FakeLLMProvider for this test
+    import os
+    os.environ["VERTEX_PROJECT_ID"] = "test-project"
 
-    pass_eval = phase2_critic(state, min_genes_expected=1)["phase2_eval"]
-    assert pass_eval["grade"] == "pass"
+    # Reset and set up fake LLM with predefined responses
+    reset_llm()
+    fake_provider = FakeLLMProvider(structured_responses=[
+        # First call (pass case)
+        {"grade": "pass", "comment": "Found 1 gene", "follow_up_queries": []},
+        # Second call (fail case)
+        {"grade": "fail", "comment": "Not enough genes", "follow_up_queries": ["more research"]},
+    ])
 
-    fail_eval = phase2_critic(state, min_genes_expected=2)["phase2_eval"]
-    assert fail_eval["grade"] == "fail"
+    # Replace the global LLM's provider
+    client = get_llm()
+    client.provider = fake_provider
+
+    try:
+        state = {
+            "current_bp_name": "DNA repair",
+            "genes_found": [
+                {
+                    "gene_symbol": "TP53",
+                    "score": 8,
+                    "biological_process": "DNA repair",
+                    "evidence_summary": "PMID:123",
+                    "sources": ["PMID:123"],
+                }
+            ],
+        }
+
+        pass_eval = phase2_critic(state, min_genes_expected=1)["phase2_eval"]
+        assert pass_eval["grade"] == "pass"
+
+        fail_eval = phase2_critic(state, min_genes_expected=2)["phase2_eval"]
+        assert fail_eval["grade"] == "fail"
+    finally:
+        # Clean up
+        reset_llm()

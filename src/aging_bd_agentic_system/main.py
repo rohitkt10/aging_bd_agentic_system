@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
 from aging_bd_agentic_system.graph.workflow import build_workflow
+from aging_bd_agentic_system.observability.tracing import create_tracing_callback
 from aging_bd_agentic_system.utils.aggregation import aggregate_outputs
+from aging_bd_agentic_system.utils.audit_logger import log_event
 from aging_bd_agentic_system.utils.output_writer import (
     ensure_output_dir,
     write_genes_tsv,
@@ -34,6 +37,7 @@ def _initial_state(hallmark: str) -> dict[str, Any]:
         "current_bp_index": 0,
         "current_bp_name": "",
         "phase2_iteration": 0,
+        "phase2_research_iteration": 0,
         "phase2_eval": {},
         "genes_found": [],
         "go_terms_found": [],
@@ -50,9 +54,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Create tracing callback for observability
+    tracing_handler = create_tracing_callback(hallmark_name=args.hallmark)
+
     graph = build_workflow()
     state = _initial_state(args.hallmark)
-    result = graph.invoke(state)
+
+    # Invoke workflow with tracing callback
+    result = graph.invoke(state, config={"callbacks": [tracing_handler]})
 
     genes, go_terms = aggregate_outputs(
         result.get("genes_found", []), result.get("go_terms_found", [])
@@ -69,6 +78,22 @@ def main() -> None:
     write_processes_tsv(out_dir, processes)
     write_genes_tsv(out_dir, genes)
     write_go_terms_tsv(out_dir, go_terms)
+
+    # Write full state to JSON for complete audit trail
+    state_file = out_dir / "full_state.json"
+    with state_file.open("w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, default=str)
+
+    # Log workflow completion event
+    log_event({
+        "hallmark": args.hallmark,
+        "event_type": "workflow_complete",
+        "biological_processes_count": len(processes),
+        "genes_count": len(genes),
+        "go_terms_count": len(go_terms),
+        "validation_passed": validation.get("passed", False),
+        "validation_issues": validation.get("issues", []),
+    })
 
     print(
         f"Completed hallmark '{args.hallmark}'. BPs={len(processes)}, "

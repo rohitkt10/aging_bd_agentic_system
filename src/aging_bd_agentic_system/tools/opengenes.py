@@ -6,19 +6,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from pydantic import BaseModel, Field
-
-
-class OpenGenesQuerySchema(BaseModel):
-    """Schema for Open Genes search tool - enables LLM to understand parameters."""
-
-    query: str = Field(
-        description="Search keywords for Open Genes (e.g., 'GHR', 'insulin signaling')"
-    )
-    max_results: int = Field(
-        default=10, description="Maximum number of results to return"
-    )
-
 
 def _extract_names(items: list[dict[str, Any]] | None) -> list[str]:
     if not items:

@@ -76,7 +76,7 @@ class VertexGeminiProvider(LLMProvider):
         )
 
     def invoke(
-        self,
+        self,w
         prompt: str,
         *,
         system_prompt: str | None = None,

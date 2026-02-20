@@ -37,7 +37,7 @@ class ResearchState(TypedDict):
     # Phase 2 tracking
     current_bp_index: int
     current_bp_name: str
-    phase2_iteration: int
+    phase2_critic_iteration: int
     phase2_research_iteration: int
     phase2_eval: Dict[str, Any]
 

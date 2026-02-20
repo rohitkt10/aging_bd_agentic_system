@@ -35,7 +35,7 @@ def phase1_route(state: dict[str, Any]) -> str:
 def phase2_route(state: dict[str, Any]) -> str:
     """Route Phase 2 critique results to refine or GO term mapping."""
     eval_data = state.get("phase2_eval", {})
-    iteration = state.get("phase2_iteration", 0)
+    iteration = state.get("phase2_critic_iteration", 0)
     if eval_data.get("grade") == "fail" and iteration < 3:
         return "phase2_refine"
     return "map_go_terms"

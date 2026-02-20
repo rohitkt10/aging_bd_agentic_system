@@ -3,7 +3,7 @@ from pdb import set_trace
 import requests
 
 query = "SIRT1"
-query = "DNA repair mitochondrial"
+#query = "DNA repair mitochondrial"
 query = "mitochondrial, DNA repair"
 # query = "GHR, SIRT1, IGF1R"
 response = requests.get(

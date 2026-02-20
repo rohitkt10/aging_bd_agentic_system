@@ -36,7 +36,7 @@ def _initial_state(hallmark: str) -> dict[str, Any]:
         "bp_queue": [],
         "current_bp_index": 0,
         "current_bp_name": "",
-        "phase2_iteration": 0,
+        "phase2_critic_iteration": 0,
         "phase2_research_iteration": 0,
         "phase2_eval": {},
         "genes_found": [],
@@ -68,6 +68,10 @@ def main() -> None:
     )
     processes = result.get("biological_processes", [])
 
+    # Warn if total GO terms is low
+    if len(go_terms) < 50:
+        print(f"WARNING: Only {len(go_terms)} GO terms found across all biological processes. Expected at least 50.")
+
     validation = validate_all(processes, genes, go_terms)
     if not validation["passed"]:
         print("Validation issues:")
@@ -91,6 +95,7 @@ def main() -> None:
         "biological_processes_count": len(processes),
         "genes_count": len(genes),
         "go_terms_count": len(go_terms),
+        "go_terms_below_threshold": len(go_terms) < 50,
         "validation_passed": validation.get("passed", False),
         "validation_issues": validation.get("issues", []),
     })

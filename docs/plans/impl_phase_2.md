@@ -668,7 +668,16 @@ def seed_gene_candidates(state: dict[str, Any]) -> dict[str, Any]:
     return {"research_scratchpad": json.dumps(candidates)}
 
 
-def phase2_research(state: dict[str, Any], gene_limit: int = 30) -> dict[str, Any]:
+def phase2_research(
+    state: dict[str, Any],
+    genage_seed_max_results: int = 50,
+    opengenes_seed_max_results: int = 50,
+    max_opengenes_items_per_field: int = -1,
+    min_actions_per_iteration: int = 1,
+    max_actions_per_iteration: int = 3,
+    pubmed_max_results: int = 5,
+    vector_db_max_results: int = 5,
+) -> dict[str, Any]:
     """
     Autonomous ReAct research loop for gene discovery.
 
@@ -677,6 +686,17 @@ def phase2_research(state: dict[str, Any], gene_limit: int = 30) -> dict[str, An
     2. Decides what to search for based on findings
     3. Shifts from exploration → exploitation over iterations
     4. Synthesizes and scores genes at the end
+
+    Args:
+        genage_seed_max_results: Maximum GenAge results to fetch during seeding (default 50)
+        opengenes_seed_max_results: Maximum OpenGenes results to fetch during seeding (default 50)
+        max_opengenes_items_per_field: Maximum items per OpenGenes field to include.
+            -1 (default): Include all items (no truncation)
+            0+: Truncate to first N items per field
+        min_actions_per_iteration: Minimum research actions per iteration (default 1)
+        max_actions_per_iteration: Maximum research actions per iteration (default 3)
+        pubmed_max_results: Maximum PubMed results to process per action (default 5)
+        vector_db_max_results: Maximum vector DB results to process per action (default 5)
 
     Iterations (configurable via PHASE2_RESEARCH_MAX_ITERATIONS):
     - Iteration 1-2: Wide exploration (all sources, broad queries)
@@ -729,9 +749,8 @@ def phase2_research(state: dict[str, Any], gene_limit: int = 30) -> dict[str, An
 
         # Store in scratchpad as structured JSON
         research_data = {
-            "candidates": candidates,
-            "findings": [],  # Accumulated findings from iterations
-            "searched_genes": set(),  # Genes we've already researched
+            "initial_database_genes": candidates,
+            "research_findings": [],  # Accumulated findings from iterations
         }
         return {
             "research_scratchpad": json.dumps(research_data, default=str),
@@ -741,9 +760,8 @@ def phase2_research(state: dict[str, Any], gene_limit: int = 30) -> dict[str, An
     # Load current research state
     try:
         research_data = json.loads(state.get("research_scratchpad", "{}"))
-        research_data["searched_genes"] = set(research_data.get("searched_genes", []))
     except json.JSONDecodeError:
-        research_data = {"candidates": [], "findings": [], "searched_genes": set()}
+        research_data = {"initial_database_genes": [], "research_findings": []}
 
     llm = get_llm()
 
@@ -762,8 +780,8 @@ def phase2_research(state: dict[str, Any], gene_limit: int = 30) -> dict[str, An
         guidance = "Synthesize all findings. Score genes 1-10. Return only genes with score 5+."
 
     # Build research summary for LLM
-    findings_summary = json.dumps(research_data.get("findings", [])[:10], indent=2)
-    candidates_summary = json.dumps([c["symbol"] for c in research_data.get("candidates", [])[:20]], indent=2)
+    findings_summary = json.dumps(research_data.get("research_findings", [])[:10], indent=2)
+    candidates_summary = json.dumps([c["symbol"] for c in research_data.get("initial_database_genes", [])[:20]], indent=2)
 
     # Create system prompt for this iteration
     research_prompt = f"""You are a gene research scientist studying "{bp_name}" as part of aging hallmark "{hallmark}".
@@ -882,14 +900,14 @@ Be specific with your queries. Use 1-3 actions per iteration.
                 })
 
     # Update research data
-    research_data["findings"].extend(new_findings)
-    research_data["findings"].extend(decisions.get("findings_notes", []))
+    research_data["research_findings"].extend(new_findings)
+    research_data["research_findings"].extend(decisions.get("findings_notes", []))
 
     # If final iteration, synthesize and score genes
     if current_iteration >= max_iterations:
         # Prepare final summary for scoring
-        all_findings = research_data.get("findings", [])
-        all_candidates = research_data.get("candidates", [])
+        all_findings = research_data.get("research_findings", [])
+        all_candidates = research_data.get("initial_database_genes", [])
 
         scoring_prompt = f"""You are finalizing gene research for "{bp_name}" (part of "{hallmark}").
 
@@ -1012,43 +1030,94 @@ def phase2_critic(state: dict[str, Any], min_genes_expected: int = 20) -> dict[s
     return {"phase2_eval": eval_result}
 
 
-def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
+def phase2_refine(
+    state: dict[str, Any],
+    max_follow_up_queries: int = 2,
+    refine_vector_db_results: int = 5,
+    refine_pubmed_results: int = 3,
+    max_genes_per_query: int = 5,
+) -> dict[str, Any]:
     """
     Run follow-up queries when Phase 2 critique fails.
+
+    Args:
+        max_follow_up_queries: Maximum follow-up queries to execute (default 2)
+        refine_vector_db_results: Max vector DB results per query (default 5)
+        refine_pubmed_results: Max PubMed results per query (default 3)
+        max_genes_per_query: Max genes to extract per query (default 5)
     """
     eval_data = state.get("phase2_eval", {})
     follow_up = eval_data.get("follow_up_queries", [])
-    iteration = state.get("phase2_iteration", 0) + 1
+    iteration = state.get("phase2_critic_iteration", 0) + 1
 
     bp_name = state.get("current_bp_name", "")
-    updates: dict[str, Any] = {"phase2_iteration": iteration}
+    updates: dict[str, Any] = {"phase2_critic_iteration": iteration}
 
-    # Simple refinement: query tools and append results
-    for query in follow_up[:2]:
+    # Refinement: query tools and extract genes using LLM
+    for query in follow_up[:max_follow_up_queries]:
         # Use the query to find more genes
-        vector_results = query_vector_db(query=query, top_k=5)
-        pubmed_results = query_pubmed(query=query, retmax=3)
+        vector_results = query_vector_db(query=query, top_k=refine_vector_db_results)
+        pubmed_results = query_pubmed(query=query, retmax=refine_pubmed_results)
 
-        # Extract gene mentions from results
-        # This is a simple heuristic; could be improved with LLM extraction
-        new_genes = []
-
+        # Collect text for LLM extraction
+        extraction_context = []
         for vec in vector_results:
-            text = vec.get("text", "")
-            # Simple gene mention extraction (capitalized words)
-            words = text.split()
-            potential_genes = [w for w in words if w.isupper() and len(w) <= 10]
-            for gene in potential_genes[:3]:
-                new_genes.append({
+            extraction_context.append(f"Corpus: {vec.get('text', '')[:500]}")
+
+        for pub in pubmed_results:
+            title = pub.get('title', '')
+            abstract = pub.get('abstract', '')
+            extraction_context.append(f"PubMed: {title}\\n{abstract[:400]}")
+
+        if not extraction_context:
+            continue
+
+        # Use LLM to extract actual gene symbols
+        llm = get_llm()
+
+        extraction_prompt = f"""## Text from Literature Search
+
+        Query: {query}
+
+        {" ".join(extraction_context)}
+
+        ## Task
+        Extract gene symbols mentioned in the text above that are relevant to: {bp_name}
+
+        Return ONLY a JSON array of gene symbols (e.g., ["TP53", "FOXO3"]).
+        """
+
+        extraction_schema = {
+            "title": "gene_symbols",
+            "type": "array",
+            "items": {"type": "string"},
+        }
+
+        try:
+            extracted_genes = llm.invoke_structured(
+                extraction_prompt,
+                schema=extraction_schema,
+                system_prompt="You are a gene symbol extractor. Return only standard gene symbols."
+            )
+
+            # Create gene entries
+            new_genes = [
+                {
                     "gene_symbol": gene,
                     "score": 6,
                     "biological_process": bp_name,
-                    "evidence_summary": f"Found in corpus: {query}",
-                    "sources": [vec.get("pmcid", "corpus")],
-                })
+                    "evidence_summary": f"Found via follow-up query: {query}",
+                    "sources": ["refinement"],
+                }
+                for gene in extracted_genes[:max_genes_per_query]
+            ]
 
-        if new_genes:
-            updates["genes_found"] = new_genes
+            if new_genes:
+                updates["genes_found"] = new_genes
+
+        except Exception:
+            # Fallback: skip gene extraction on failure
+            pass
 
     return updates
 
@@ -1142,7 +1211,8 @@ def advance_bp(state: dict[str, Any]) -> dict[str, Any]:
         "current_bp_index": state.get("current_bp_index", 0) + 1,
         "current_bp_name": "",
         "research_scratchpad": "",
-        "phase2_iteration": 0,
+        "phase2_critic_iteration": 0,
+        "phase2_research_iteration": 0,  # Also reset research iteration for next BP
     }
 ```
 

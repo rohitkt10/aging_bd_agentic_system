@@ -82,8 +82,8 @@ def validate_phase2(
             issues.append(_issue(f"gene[{idx}] missing sources"))
 
     go_count = len(go_terms)
-    if go_count < 50 or go_count > 80:
-        issues.append(_issue(f"expected 50-80 GO terms, got {go_count}"))
+    # Note: GO term count validation removed - user handles filtering/sorting by score
+    # Minimum warning is logged in main.py
 
     for idx, term in enumerate(go_terms):
         missing = [

@@ -5,8 +5,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 from aging_bd_agentic_system.literature_pipeline import config
 
 
@@ -40,19 +38,6 @@ def _extract_definition(node: dict[str, Any]) -> str | None:
 def _extract_go_id(node_id: str) -> str:
     go_id = node_id.split("/")[-1]
     return go_id.replace("_", ":")
-
-
-class GOTermQuerySchema(BaseModel):
-    """Schema for GO term search tool - enables LLM to understand parameters."""
-
-    query: str = Field(
-        description=(
-            "Search keywords for GO definitions (e.g., 'mitochondria inheritance')"
-        )
-    )
-    max_results: int = Field(
-        default=10, description="Maximum number of GO terms to return"
-    )
 
 
 def query_go_terms(query: str, max_results: int = 10) -> list[dict[str, str]]:

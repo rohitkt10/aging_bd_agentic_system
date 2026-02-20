@@ -4,7 +4,6 @@ import os
 from typing import Any
 
 from Bio import Entrez
-from pydantic import BaseModel, Field
 
 
 def _init_entrez(email: str, api_key: str | None = None) -> None:
@@ -57,27 +56,6 @@ def _extract_authors(author_list: list[dict[str, Any]] | None) -> list[str]:
         elif last:
             authors.append(str(last))
     return authors
-
-
-class PubMedQuerySchema(BaseModel):
-    """Schema for PubMed search tool - enables LLM to understand parameters."""
-
-    query: str = Field(
-        description="Search keywords for PubMed (e.g., 'DNA methylation aging')"
-    )
-    retmax: int = Field(default=10, description="Maximum results to return (1-100)")
-    date_from: str | None = Field(
-        default=None, description="Start date YYYY/MM/DD format"
-    )
-    date_to: str | None = Field(default=None, description="End date YYYY/MM/DD format")
-    email: str | None = Field(
-        default=None,
-        description="NCBI contact email (falls back to NCBI_EMAIL env var)",
-    )
-    api_key: str | None = Field(
-        default=None,
-        description="Optional NCBI API key (falls back to NCBI_API_KEY env var)",
-    )
 
 
 def query_pubmed(

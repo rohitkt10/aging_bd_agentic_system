@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .providers import VertexGeminiProvider
+from .providers import LLMProvider, OpenAIProvider, VertexGeminiProvider
 
 
 class LLMClient:
@@ -24,26 +24,69 @@ class LLMClient:
     without knowing which provider is being used.
     """
 
-    def __init__(self) -> None:
-        """Initialize LLM client from environment variables."""
+    def __init__(self, provider: str | None = None) -> None:
+        """
+        Initialize LLM client from environment variables.
+
+        Args:
+            provider: Override provider ("vertex" or "openai"). If None, uses LLM_PROVIDER env var.
+
+        Raises:
+            ValueError: If required environment variables are not set.
+        """
+        provider = provider or os.environ.get("LLM_PROVIDER", "vertex").lower()
+
+        if provider == "openai":
+            self.provider = self._init_openai()
+        elif provider == "vertex":
+            self.provider = self._init_vertex()
+        else:
+            raise ValueError(
+                f"Unknown LLM_PROVIDER: {provider}. Must be 'vertex' or 'openai'."
+            )
+
+    def _init_vertex(self) -> LLMProvider:
+        """Initialize Vertex AI Gemini provider."""
         project_id = os.environ.get("VERTEX_PROJECT_ID")
         if not project_id:
             raise ValueError(
-                "VERTEX_PROJECT_ID environment variable must be set. "
-                "Add it to your .env file."
+                "VERTEX_PROJECT_ID environment variable must be set for Vertex AI. "
+                "Add it to your .env file or use LLM_PROVIDER=openai with OPENAI_API_KEY."
             )
 
         location = os.environ.get("VERTEX_LOCATION", "us-central1")
-        model = os.environ.get("VERTEX_MODEL", "gemini-2.0-flash-exp-01-21")
+        model = os.environ.get("VERTEX_MODEL", "gemini-2.5-pro")
         temperature = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
         max_tokens = os.environ.get("LLM_MAX_TOKENS")
 
-        self.provider = VertexGeminiProvider(
+        return VertexGeminiProvider(
             project_id=project_id,
             location=location,
             model=model,
             temperature=temperature,
             max_tokens=int(max_tokens) if max_tokens else None,
+        )
+
+    def _init_openai(self) -> LLMProvider:
+        """Initialize OpenAI provider."""
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable must be set for OpenAI. "
+                "Add it to your .env file."
+            )
+
+        model = os.environ.get("OPENAI_MODEL", "gpt-5.2")
+        temperature = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
+        max_tokens = os.environ.get("LLM_MAX_TOKENS")
+        base_url = os.environ.get("OPENAI_BASE_URL")
+
+        return OpenAIProvider(
+            api_key=api_key,
+            model=model,
+            temperature=temperature,
+            max_tokens=int(max_tokens) if max_tokens else None,
+            base_url=base_url,
         )
 
     def invoke(
@@ -99,7 +142,7 @@ def get_llm() -> LLMClient:
         The singleton LLMClient
 
     Raises:
-        ValueError: If VERTEX_PROJECT_ID is not set
+        ValueError: If required environment variables are not set
     """
     global _global_client
     if _global_client is None:

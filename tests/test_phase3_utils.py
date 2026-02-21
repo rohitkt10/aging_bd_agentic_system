@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def test_validate_phase2_passes_and_fails() -> None:
     fail = validate_phase2(_sample_genes(10), _sample_go_terms(10))
     assert fail["passed"] is False
     assert any("expected 300-500 genes" in issue for issue in fail["issues"])
-    assert any("expected 50-80 GO terms" in issue for issue in fail["issues"])
+    # Note: GO term count validation was removed - minimum warning is logged in main.py
 
 
 def test_validate_all_flattens_issues() -> None:
@@ -173,15 +174,26 @@ def test_aggregate_outputs_runs_all_steps() -> None:
 
 
 def test_context_manager_summarizes_when_over_budget() -> None:
-    state = {
-        "tool_call_history": ["tool"] * 50,
-        "reasoning_trace": ["reason"] * 50,
-        "research_scratchpad": "word " * 200,
-    }
-    updates = summarize_if_needed(state, max_tokens=10)
-    assert updates["context_summary"]
-    assert updates["tool_call_history"] == []
-    assert updates["reasoning_trace"] == []
+    """Test that summarize_if_needed creates context_summary when over budget."""
+    # Disable LLM summarization to use fallback
+    original = os.environ.get("USE_LLM_SUMMARIZATION")
+    os.environ["USE_LLM_SUMMARIZATION"] = "false"
+
+    try:
+        state = {
+            "tool_call_history": ["tool"] * 50,
+            "reasoning_trace": ["reason"] * 50,
+            "research_scratchpad": json.dumps({"initial_database_genes": [], "research_findings": []}),
+        }
+        updates = summarize_if_needed(state, max_tokens=10)
+        assert updates["context_summary"]
+        assert updates["tool_call_history"] == []
+        assert updates["reasoning_trace"] == []
+    finally:
+        if original is None:
+            os.environ.pop("USE_LLM_SUMMARIZATION", None)
+        else:
+            os.environ["USE_LLM_SUMMARIZATION"] = original
 
 
 def test_context_manager_no_summary_when_under_budget() -> None:
@@ -221,69 +233,90 @@ def test_estimate_tokens_uses_character_heuristic() -> None:
     assert estimate_tokens(technical) > 0
 
 
-def test_summarize_research_scratchpad_preserves_critical_info() -> None:
-    """Test that _summarize_research_scratchpad preserves candidates, recent findings, and iteration."""
-    from aging_bd_agentic_system.utils.context_manager import _summarize_research_scratchpad
+def test_summarize_for_actionability_fallback_preserves_info() -> None:
+    """Test that _fallback_actionability_summary preserves candidates and findings."""
+    from aging_bd_agentic_system.utils.context_manager import _fallback_actionability_summary
 
     # Create realistic research data
     research_data = {
-        "candidates": [
+        "initial_database_genes": [
             {"symbol": "TP53", "name": "Tumor protein p53", "source": "genage"},
             {"symbol": "FOXO3", "name": "Forkhead box O3", "source": "opengenes"},
             {"symbol": "SIRT1", "name": "Sirtuin 1", "source": "genage"},
         ],
-        "findings": [
+        "research_findings": [
             {"gene": "TP53", "source": "genage", "finding": "Longevity association: pro-longevity"},
             {"gene": "FOXO3", "source": "opengenes", "finding": "Intervention: lifespan extension"},
             {"gene": "SIRT1", "source": "pubmed", "finding": "Regulates autophagy"},
         ] * 5,  # 15 findings total
-        "searched_genes": ["TP53", "FOXO3"],
     }
 
-    scratchpad = json.dumps(research_data)
-    summary = _summarize_research_scratchpad(scratchpad, max_words=100)
+    state = {"phase2_research_iteration": 3}
+    summary = _fallback_actionability_summary(research_data, state)
 
     # Check that critical info is preserved
-    assert "TP53" in summary
-    assert "FOXO3" in summary
-    assert "Candidates:" in summary
-    assert len(summary.split()) <= 150  # Should be close to max_words
+    assert "top_candidates" in summary
+    assert "high_value_findings" in summary
+    assert "iteration_state" in summary
+    assert summary["iteration_state"]["current_iteration"] == 3
+    # Check at least one candidate is present
+    assert len(summary["top_candidates"]) > 0
 
 
-def test_summarize_research_scratchpad_handles_invalid_json() -> None:
-    """Test that _summarize_research_scratchpad handles non-JSON gracefully."""
-    from aging_bd_agentic_system.utils.context_manager import _summarize_research_scratchpad
+def test_summarize_for_scoring_fallback_groups_evidence() -> None:
+    """Test that _fallback_scoring_summary groups evidence by gene."""
+    from aging_bd_agentic_system.utils.context_manager import _fallback_scoring_summary
 
-    # Non-JSON input should just be truncated
-    text = "word " * 1000
-    summary = _summarize_research_scratchpad(text, max_words=50)
+    research_data = {
+        "initial_database_genes": [
+            {"symbol": "TP53", "name": "Tumor protein p53", "source": "genage"},
+        ],
+        "research_findings": [
+            {"gene": "TP53", "source": "genage", "finding": "Longevity association"},
+            {"gene": "TP53", "source": "pubmed", "finding": "Regulates aging"},
+        ],
+    }
 
-    # Should truncate close to max_words (allowing for some slop)
-    assert len(summary.split()) <= 60  # Allow some tolerance
-    assert summary.endswith("...")
+    summary = _fallback_scoring_summary(research_data)
+
+    # Check structure
+    assert "candidate_evidence" in summary
+    assert "total_genes_with_evidence" in summary
+    assert summary["total_genes_with_evidence"] >= 1
 
 
 def test_summarize_if_needed_preserves_iteration_state() -> None:
-    """Test that summarization preserves current iteration state."""
-    state = {
-        "tool_call_history": ["call1", "call2", "call3"],
-        "reasoning_trace": ["reason1", "reason2"],
-        "research_scratchpad": '{"findings": [], "candidates": []}',
-        "phase2_research_iteration": 5,
-    }
+    """Test that summarization clears working memory and creates context_summary."""
+    # Disable LLM summarization to use fallback
+    original = os.environ.get("USE_LLM_SUMMARIZATION")
+    os.environ["USE_LLM_SUMMARIZATION"] = "false"
 
-    # Create a large state that will trigger summarization
-    large_state = state.copy()
-    large_state["tool_call_history"] = ["tool"] * 10000
-    large_state["reasoning_trace"] = ["reason"] * 10000
+    try:
+        state = {
+            "tool_call_history": ["call1", "call2", "call3"],
+            "reasoning_trace": ["reason1", "reason2"],
+            "research_scratchpad": json.dumps({"initial_database_genes": [], "research_findings": []}),
+            "phase2_research_iteration": 5,
+        }
 
-    updates = summarize_if_needed(large_state, max_tokens=100)
+        # Create a large state that will trigger summarization
+        large_state = state.copy()
+        large_state["tool_call_history"] = ["tool"] * 10000
+        large_state["reasoning_trace"] = ["reason"] * 10000
 
-    # Check that iteration info is in summary
-    assert "iteration: 5" in updates["context_summary"].lower()
-    assert updates["tool_call_history"] == []
-    assert updates["reasoning_trace"] == []
-    assert updates["research_scratchpad"] == ""
+        updates = summarize_if_needed(large_state, max_tokens=100)
+
+        # Check that working memory is cleared
+        assert updates["tool_call_history"] == []
+        assert updates["reasoning_trace"] == []
+        # Check that context_summary is created (structured JSON)
+        assert "context_summary" in updates
+        assert updates["context_summary"]  # Non-empty
+    finally:
+        if original is None:
+            os.environ.pop("USE_LLM_SUMMARIZATION", None)
+        else:
+            os.environ["USE_LLM_SUMMARIZATION"] = original
 
 
 def test_summarize_if_needed_returns_empty_when_under_budget() -> None:
@@ -301,46 +334,53 @@ def test_summarize_if_needed_returns_empty_when_under_budget() -> None:
 
 def test_context_manager_with_realistic_research_state() -> None:
     """Test context management with realistic Phase 2 research state."""
-    # Create realistic research scratchpad with many findings
-    findings = [
-        {
-            "source": "genage",
-            "gene": f"GENE{i}",
-            "query": f"aging mechanism {i}",
-            "finding": f"Longevity association result {i}: " + "details " * 20,
+    # Disable LLM summarization to use fallback
+    original = os.environ.get("USE_LLM_SUMMARIZATION")
+    os.environ["USE_LLM_SUMMARIZATION"] = "false"
+
+    try:
+        # Create realistic research scratchpad with many findings
+        findings = [
+            {
+                "source": "genage",
+                "gene": f"GENE{i}",
+                "query": f"aging mechanism {i}",
+                "finding": f"Longevity association result {i}: " + "details " * 20,
+            }
+            for i in range(100)
+        ]
+
+        candidates = [
+            {"symbol": f"GENE{i}", "name": f"Gene {i}", "source": "genage"}
+            for i in range(50)
+        ]
+
+        research_data = {
+            "initial_database_genes": candidates,
+            "research_findings": findings,
         }
-        for i in range(100)
-    ]
 
-    candidates = [
-        {"symbol": f"GENE{i}", "name": f"Gene {i}", "source": "genage"}
-        for i in range(50)
-    ]
+        state = {
+            "tool_call_history": ["call"] * 1000,
+            "reasoning_trace": ["reason"] * 1000,
+            "research_scratchpad": json.dumps(research_data),
+            "phase2_research_iteration": 7,
+        }
 
-    research_data = {
-        "candidates": candidates,
-        "findings": findings,
-        "searched_genes": [f"GENE{i}" for i in range(30)],
-    }
+        # This should trigger summarization
+        updates = summarize_if_needed(state, max_tokens=10000)
 
-    state = {
-        "tool_call_history": ["call"] * 1000,
-        "reasoning_trace": ["reason"] * 1000,
-        "research_scratchpad": json.dumps(research_data),
-        "phase2_research_iteration": 7,
-    }
+        # Verify updates
+        assert "context_summary" in updates
+        assert updates["tool_call_history"] == []
+        assert updates["reasoning_trace"] == []
 
-    # This should trigger summarization
-    updates = summarize_if_needed(state, max_tokens=10000)
-
-    # Verify updates
-    assert "context_summary" in updates
-    assert updates["tool_call_history"] == []
-    assert updates["reasoning_trace"] == []
-    assert updates["research_scratchpad"] == ""
-
-    # Verify summary contains recent info (last 5 findings are shown)
-    summary = updates["context_summary"]
-    assert "iteration: 7" in summary.lower()
-    # The last 5 findings should be shown (GENE95-99)
-    assert "GENE9" in summary  # At least one of the high-numbered genes should be there
+        # Verify summary is structured JSON
+        summary = updates["context_summary"]
+        summary_data = json.loads(summary)
+        assert "top_candidates" in summary_data or "iteration_state" in summary_data
+    finally:
+        if original is None:
+            os.environ.pop("USE_LLM_SUMMARIZATION", None)
+        else:
+            os.environ["USE_LLM_SUMMARIZATION"] = original

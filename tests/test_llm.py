@@ -151,12 +151,13 @@ class TestPromptsModule:
         """Test that Phase 2 prompts are defined."""
         from aging_bd_agentic_system.llm import prompts
 
-        assert hasattr(prompts, "PHASE2_RESEARCH_PROMPT")
-        assert hasattr(prompts, "PHASE2_CRITIQUE_PROMPT")
-        assert hasattr(prompts, "PHASE2_GO_MAPPING_PROMPT")
+        assert hasattr(prompts, "PHASE2_RESEARCH_SYSTEM_PROMPT")
+        assert hasattr(prompts, "PHASE2_CRITIQUE_SYSTEM_PROMPT")
+        assert hasattr(prompts, "PHASE2_GO_MAPPING_SYSTEM_PROMPT")
+        assert hasattr(prompts, "PHASE2_DECISION_USER_PROMPT")
 
-        # Verify prompts have placeholders
-        assert "{biological_process}" in prompts.PHASE2_RESEARCH_PROMPT
-        assert "{hallmark_name}" in prompts.PHASE2_RESEARCH_PROMPT
-        assert "{biological_process}" in prompts.PHASE2_CRITIQUE_PROMPT
-        assert "{genes_json}" in prompts.PHASE2_CRITIQUE_PROMPT
+        # Verify prompts have expected placeholders
+        assert "{biological_process}" in prompts.PHASE2_RESEARCH_SYSTEM_PROMPT
+        assert "{hallmark_name}" in prompts.PHASE2_RESEARCH_SYSTEM_PROMPT
+        assert "{biological_process}" in prompts.PHASE2_CRITIQUE_SYSTEM_PROMPT
+        assert "{biological_process}" in prompts.PHASE2_GO_MAPPING_SYSTEM_PROMPT

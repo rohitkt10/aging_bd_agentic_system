@@ -61,7 +61,7 @@ class VertexGeminiProvider(LLMProvider):
         Args:
             project_id: Google Cloud project ID
             location: Vertex AI region (e.g., "us-central1")
-            model: Model name (e.g., "gemini-2.0-flash-exp-01-21")
+            model: Model name (e.g., "gemini-2.5-pro", "gemini-2.0-flash")
             temperature: Sampling temperature (0.0 - 1.0)
             max_tokens: Maximum tokens in response (None for default)
         """
@@ -76,7 +76,7 @@ class VertexGeminiProvider(LLMProvider):
         )
 
     def invoke(
-        self,w
+        self,
         prompt: str,
         *,
         system_prompt: str | None = None,
@@ -122,6 +122,102 @@ class VertexGeminiProvider(LLMProvider):
 
         Note: Uses LangChain's with_structured_output() which works with
         models that support tool/function calling (Gemini does).
+        """
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        # Wrap the LLM with structured output
+        llm_structured = self.llm.with_structured_output(schema)
+
+        if system_prompt:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt)
+            ]
+        else:
+            messages = [HumanMessage(content=prompt)]
+
+        response = llm_structured.invoke(messages, **kwargs)
+        return response
+
+
+class OpenAIProvider(LLMProvider):
+    """OpenAI implementation of LLMProvider."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-5.2",
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        base_url: str | None = None,
+    ):
+        """
+        Initialize OpenAI provider.
+
+        Args:
+            api_key: OpenAI API key
+            model: Model name (e.g., "gpt-5.2", "gpt-4o", "gpt-4o-mini")
+            temperature: Sampling temperature (0.0 - 2.0)
+            max_tokens: Maximum tokens in response (None for default)
+            base_url: Optional base URL for API (for Azure OpenAI or local servers)
+        """
+        from langchain_openai import ChatOpenAI
+
+        self.llm = ChatOpenAI(
+            api_key=api_key,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            base_url=base_url,
+        )
+
+    def invoke(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        **kwargs: Any
+    ) -> str:
+        """
+        Invoke LLM with text prompt, return response text.
+
+        Args:
+            prompt: The user prompt/task
+            system_prompt: Optional system prompt with instructions
+            **kwargs: Additional provider-specific parameters
+        """
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        if system_prompt:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt)
+            ]
+        else:
+            messages = [HumanMessage(content=prompt)]
+
+        response = self.llm.invoke(messages, **kwargs)
+        return response.content
+
+    def invoke_structured(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+        *,
+        system_prompt: str | None = None,
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Invoke LLM with structured output schema.
+
+        Args:
+            prompt: The user prompt/task
+            schema: Expected output schema
+            system_prompt: Optional system prompt with instructions
+            **kwargs: Additional provider-specific parameters
+
+        Note: Uses LangChain's with_structured_output() which works with
+        models that support tool/function calling (GPT-4, GPT-3.5-turbo do).
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 

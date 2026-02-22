@@ -81,9 +81,9 @@ def validate_phase2(
         if not isinstance(sources, list) or not sources:
             issues.append(_issue(f"gene[{idx}] missing sources"))
 
-    go_count = len(go_terms)
     # Note: GO term count validation removed - user handles filtering/sorting by score
     # Minimum warning is logged in main.py
+    _ = len(go_terms)  # Keep for reference, unused in validation
 
     for idx, term in enumerate(go_terms):
         missing = [

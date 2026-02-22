@@ -1,3 +1,12 @@
+"""
+Main entry point for the aging BD agentic system.
+
+Usage:
+    python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
+    python -m aging_bd_agentic_system.main --hallmark "..." --config config.yaml
+    python -m aging_bd_agentic_system.main --hallmark "..." --max-iterations 1
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -5,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from aging_bd_agentic_system.config import RunConfig
 from aging_bd_agentic_system.graph.workflow import build_workflow
 from aging_bd_agentic_system.observability.tracing import create_tracing_callback
 from aging_bd_agentic_system.utils.aggregation import aggregate_outputs
@@ -18,10 +28,51 @@ from aging_bd_agentic_system.utils.output_writer import (
 from aging_bd_agentic_system.utils.validation import validate_all
 
 
-def _initial_state(hallmark: str) -> dict[str, Any]:
-    """Build the initial ResearchState dictionary."""
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Run aging BD workflow for hallmark curation"
+    )
+
+    # Required
+    parser.add_argument(
+        "--hallmark", required=True, help="Aging hallmark name (e.g., 'epigenetic alterations')"
+    )
+
+    # Config file
+    parser.add_argument(
+        "--config", type=Path, help="Path to YAML config file"
+    )
+
+    # Output
+    parser.add_argument(
+        "--output-dir", default="outputs", help="Base directory for output artifacts"
+    )
+
+    # Phase 1 overrides
+    parser.add_argument("--min-research-goals", type=int, help="Min research goals")
+    parser.add_argument("--max-research-goals", type=int, help="Max research goals")
+    parser.add_argument("--vector-db-top-k", type=int, help="Vector DB results per query")
+    parser.add_argument("--pubmed-retmax", type=int, help="PubMed results per query")
+    parser.add_argument("--max-iterations", type=int, help="Max refinement iterations")
+    parser.add_argument("--max-processes", type=int, help="Max final processes")
+
+    # Phase 2 overrides
+    parser.add_argument(
+        "--max-research-iterations", type=int, help="Max research iterations per BP"
+    )
+    parser.add_argument(
+        "--max-refine-iterations", type=int, help="Max refine iterations per BP"
+    )
+
+    return parser.parse_args()
+
+
+def _initial_state(config: RunConfig) -> dict[str, Any]:
+    """Build the initial ResearchState dictionary with config."""
     return {
-        "hallmark_name": hallmark,
+        "hallmark_name": config.hallmark,
+        "config": config.to_dict(),
         "tool_call_history": [],
         "reasoning_trace": [],
         "warnings": [],
@@ -29,9 +80,11 @@ def _initial_state(hallmark: str) -> dict[str, Any]:
         "context_summary": None,
         "token_count": 0,
         "research_scratchpad": "",
-        "phase1_plan": [],
+        "phase1_plan": {},
         "phase1_iteration": 0,
-        "phase1_eval": {},
+        "phase1_critique": None,
+        "phase1_critic_recommendations": None,
+        "phase1_eval": None,
         "biological_processes": [],
         "bp_queue": [],
         "current_bp_index": 0,
@@ -45,20 +98,32 @@ def _initial_state(hallmark: str) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run aging BD workflow")
-    parser.add_argument("--hallmark", required=True, help="Aging hallmark name")
-    parser.add_argument(
-        "--output-dir",
-        default="outputs",
-        help="Base directory for output artifacts",
+    args = parse_args()
+
+    # Build config: defaults → YAML → CLI
+    config = RunConfig()
+
+    if args.config:
+        config = RunConfig.from_yaml(args.config)
+
+    config = config.merge_cli(
+        hallmark=args.hallmark,
+        output_dir=args.output_dir,
+        min_research_goals=args.min_research_goals,
+        max_research_goals=args.max_research_goals,
+        vector_db_top_k=args.vector_db_top_k,
+        pubmed_retmax=args.pubmed_retmax,
+        max_iterations=args.max_iterations,
+        max_processes=args.max_processes,
+        max_research_iterations=args.max_research_iterations,
+        max_refine_iterations=args.max_refine_iterations,
     )
-    args = parser.parse_args()
 
     # Create tracing callback for observability
-    tracing_handler = create_tracing_callback(hallmark_name=args.hallmark)
+    tracing_handler = create_tracing_callback(hallmark_name=config.hallmark)
 
     graph = build_workflow()
-    state = _initial_state(args.hallmark)
+    state = _initial_state(config)
 
     # Invoke workflow with tracing callback
     result = graph.invoke(state, config={"callbacks": [tracing_handler]})
@@ -70,7 +135,9 @@ def main() -> None:
 
     # Warn if total GO terms is low
     if len(go_terms) < 50:
-        print(f"WARNING: Only {len(go_terms)} GO terms found across all biological processes. Expected at least 50.")
+        print(
+            f"WARNING: Only {len(go_terms)} GO terms found. Expected at least 50."
+        )
 
     validation = validate_all(processes, genes, go_terms)
     if not validation["passed"]:
@@ -78,7 +145,7 @@ def main() -> None:
         for issue in validation["issues"]:
             print(f"- {issue}")
 
-    out_dir = ensure_output_dir(Path(args.output_dir), args.hallmark)
+    out_dir = ensure_output_dir(config.output_dir, config.hallmark)
     write_processes_tsv(out_dir, processes)
     write_genes_tsv(out_dir, genes)
     write_go_terms_tsv(out_dir, go_terms)
@@ -89,20 +156,22 @@ def main() -> None:
         json.dump(result, f, indent=2, default=str)
 
     # Log workflow completion event
-    log_event({
-        "hallmark": args.hallmark,
-        "event_type": "workflow_complete",
-        "biological_processes_count": len(processes),
-        "genes_count": len(genes),
-        "go_terms_count": len(go_terms),
-        "go_terms_below_threshold": len(go_terms) < 50,
-        "validation_passed": validation.get("passed", False),
-        "validation_issues": validation.get("issues", []),
-    })
+    log_event(
+        {
+            "hallmark": config.hallmark,
+            "event_type": "workflow_complete",
+            "biological_processes_count": len(processes),
+            "genes_count": len(genes),
+            "go_terms_count": len(go_terms),
+            "go_terms_below_threshold": len(go_terms) < 50,
+            "validation_passed": validation.get("passed", False),
+            "validation_issues": validation.get("issues", []),
+        }
+    )
 
     print(
-        f"Completed hallmark '{args.hallmark}'. BPs={len(processes)}, "
-        f"genes={len(genes)}, GO terms={len(go_terms)}."
+        f"Completed hallmark '{config.hallmark}'. "
+        f"BPs={len(processes)}, genes={len(genes)}, GO terms={len(go_terms)}."
     )
 
 

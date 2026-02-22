@@ -297,257 +297,82 @@ __all__ = ["LLMClient", "get_llm", "reset_llm", "LLMProvider", "VertexGeminiProv
 
 ---
 
-## 1.6 Environment Configuration
+## 1.6 Configuration System
 
-**File:** `.env.example`
+**Files:** `src/aging_bd_agentic_system/config.py`, `config/default.yaml`, `.env.example`
 
-**Action:** Create or update with the following:
+**Architecture:** Configuration follows a priority hierarchy:
+1. `RunConfig` dataclass defaults (lowest priority)
+2. YAML config file (`config/default.yaml` or `--config` flag)
+3. CLI arguments (highest priority)
 
-```bash
-# ===========================================
-# LLM Configuration (Vertex AI Gemini)
-# ===========================================
-VERTEX_PROJECT_ID=your-google-cloud-project-id
-VERTEX_LOCATION=us-central1
-VERTEX_MODEL=gemini-2.0-flash-001
+**`.env` is ONLY for secrets** (API keys, project IDs). Non-secret configuration goes through the config system.
 
-# Optional: Override default LLM parameters
-# LLM_TEMPERATURE=0.7
-# LLM_MAX_TOKENS=8192
+### Config Dataclasses
 
-# ===========================================
-# Research Loop Configuration
-# ===========================================
-# Phase 1: Biological Process Identification
-# PHASE1_MAX_ITERATIONS=3
+```python
+@dataclass
+class Phase1Config:
+    min_research_goals: int = 4
+    max_research_goals: int = 6
+    vector_db_top_k: int = 20
+    pubmed_retmax: int = 10
+    max_iterations: int = 2
+    max_processes: int = 15
 
-# Phase 2: Gene Research (per biological process)
-# PHASE2_RESEARCH_MAX_ITERATIONS=7
-# PHASE2_REFINE_MAX_ITERATIONS=3
-
-# ===========================================
-# PubMed / NCBI Configuration
-# ===========================================
-NCBI_EMAIL=your-email@example.com
-NCBI_API_KEY=optional-api-key-from-ncbi
-
-# ===========================================
-# Literature Pipeline (already configured)
-# ===========================================
-# EMBEDDING_MODEL_ID=BAAI/bge-base-en-v1.5
-# CHUNK_SIZE_WORDS=300
-# CHUNK_OVERLAP_WORDS=50
+@dataclass
+class RunConfig:
+    hallmark: str = ""
+    output_dir: Path = Path("outputs")
+    use_llm_summarization: bool = True
+    phase1: Phase1Config = field(default_factory=Phase1Config)
+    phase2: Phase2Config = field(default_factory=Phase2Config)
 ```
 
-**Important:** Update your actual `.env` file (not `.env.example`) with your real Google Cloud project ID.
+**Config travels through state:** All agents read from `state["config"]` instead of environment variables.
+
+### Environment Variables (Secrets Only)
+
+```bash
+# .env - SECRETS ONLY
+VERTEX_PROJECT_ID=your-google-cloud-project-id
+VERTEX_LOCATION=us-central1
+VERTEX_MODEL=gemini-2.5-pro
+NCBI_EMAIL=your-email@example.com
+NCBI_API_KEY=optional-api-key-from-ncbi
+```
+
+**Important:** Update your actual `.env` file with your real Google Cloud project ID.
 
 ---
 
 ## 1.7 Prompt Templates (`llm/prompts.py`)
 
-**Purpose:** Centralize all prompt templates. Migrate from `agents/prompts/` and improve.
+**Purpose:** Centralize all prompt templates with clear documentation.
 
-**Implementation:**
+**Key Phase 1 Prompts:**
 
-```python
-"""
-Prompt templates for the deep research system.
+| Prompt | Purpose | Input Variables | Output |
+|--------|---------|-----------------|--------|
+| `PHASE1_PLAN_SYSTEM_PROMPT` | Generate research goals with tool-specific search terms | `hallmark_name`, `min_goals`, `max_goals` | JSON with `research_goals` array |
+| `PHASE1_SYSTEM_PROMPT` | Identify biological processes from evidence | `hallmark_name` | JSON array of processes |
+| `PHASE1_CRITIC_UNSTRUCTURED_PROMPT` | Free-form critique (~100 words) | `hallmark_name`, `current_iteration`, `max_iterations`, `processes_json` | Free-text critique |
+| `PHASE1_CRITIC_STRUCTURED_PROMPT` | Extract structured recommendations | `critique_text`, `processes_json` | JSON with `grade`, `vector_db_queries`, `pubmed_queries`, `focus_areas` |
 
-All prompts should be defined here with clear documentation on:
-- Expected inputs (variables)
-- Expected outputs (structure)
-- When to use the prompt
-"""
+**Key Phase 2 Prompts:**
 
-# ===== PHASE 1 PROMPTS =====
-
-PHASE1_SYSTEM_PROMPT = """You are an expert biological process identifier for aging hallmark curation.
-
-## Task
-Identify 10-15 biological processes that comprise the hallmark: {hallmark_name}
-
-## Context
-- Lopez-Otin hallmarks paper (Cell 2023) is provided as reference
-- Use this as your primary source for understanding the hallmark
-
-## Process Criteria
-- Each process must be mechanistically distinct (no overlap)
-- Focus on molecular/cellular mechanisms, not outcomes
-- Examples: "DNA methylation changes", "Histone modification alterations"
-- Bad examples: "Cellular aging" (too broad), "Disease" (outcome not mechanism)
-
-## Evidence Scoring (1-10)
-- 9-10: Extensively documented, core mechanism in Lopez-Otin + multiple external sources
-- 7-8: Well-supported, mentioned in Lopez-Otin or similar reviews
-- 5-6: Moderate evidence, multiple studies
-- 3-4: Limited evidence, speculative
-- 1-2: Minimal evidence, highly speculative
-
-## Output Format
-Return ONLY a JSON list of processes:
-```json
-[
-  {{
-    "process_name": "DNA methylation changes",
-    "evidence_score": 9,
-    "evidence_summary": "Supported by Lopez-Otin et al. 2023 and 15 papers on epigenetic clocks.",
-    "sources": ["Lopez-Otin", "PMID:12345"]
-  }}
-]
-```
-
-Requirements:
-- Exactly 10-15 processes
-- Each evidence_summary must cite sources
-- Scores are integers 1-10
-- Return JSON only, no additional text
-"""
-
-PHASE1_CRITIQUE_PROMPT = """You are a quality evaluator for biological process identification.
-
-## Task
-Evaluate the following list of biological processes for the hallmark: {hallmark_name}
-
-## Processes to Evaluate
-{processes_json}
-
-## Evaluation Criteria
-1. Count: Must have 10-15 distinct processes
-2. Evidence: Each process must have sources and evidence summary
-3. Distinctness: No overlapping or duplicate processes
-4. Specificity: Processes are mechanisms, not outcomes
-
-## Count Adjustment (CRITICAL)
-- If count < 10: You MUST suggest specific processes to SPLIT into narrower concepts
-  - Example: "Split 'DNA methylation changes' into 'DNA hypermethylation' and 'DNA hypomethylation'"
-  - Example: "Split 'mitochondrial dysfunction' into 'mitochondrial DNA damage' and 'mitochondrial biogenesis decline'"
-- If count > 15: You MUST suggest specific processes to MERGE
-  - Example: "Merge 'histone acetylation alterations' and 'histone methylation alterations' into 'histone modification alterations'"
-  - Example: "Merge 'autophagy impairment' and 'mitophagy decline' into 'autophagy pathway dysfunction'"
-
-## Output Format
-Return ONLY JSON:
-```json
-{{
-  "grade": "pass|fail",
-  "comment": "brief explanation",
-  "missing_themes": ["theme1", "theme2"],
-  "follow_up_queries": ["query1", "query2"],
-  "split_instructions": ["Split X into A and B", ...],
-  "merge_instructions": ["Merge X and Y into Z", ...]
-}}
-```
-
-Rules for split_instructions:
-- Only provide if count < 10
-- Each instruction should clearly state: "Split 'process_name' into 'new_name_1' and 'new_name_2'"
-- Choose processes that are conceptually broad enough to split
-- Split into biologically meaningful sub-processes
-
-Rules for merge_instructions:
-- Only provide if count > 15
-- Each instruction should clearly state: "Merge 'process_1' and 'process_2' into 'merged_name'"
-- Choose processes that are overlapping or highly related
-- The merged name should be inclusive and biologically accurate
-
-Return JSON only, no additional text.
-"""
-
-# ===== PHASE 2 PROMPTS =====
-
-PHASE2_RESEARCH_PROMPT = """You are a gene evidence synthesis agent for aging biological processes.
-
-## Task
-For the biological process "{biological_process}", identify and score relevant genes.
-
-## Context
-- This process is part of the aging hallmark: {hallmark_name}
-- Candidate genes were identified from GenAge and OpenGenes databases
-- You have access to literature evidence from PubMed and the corpus
-
-## Gene Scoring (1-10)
-- 9-10: Strong evidence from multiple sources, direct link to aging and this process
-- 7-8: Good evidence from multiple sources
-- 5-6: Moderate evidence, some connection
-- 3-4: Weak evidence, indirect connection
-- 1-2: Minimal evidence, speculative
-
-## Output Format
-For each gene, return:
-```json
-{{
-  "gene_symbol": "TP53",
-  "score": 8,
-  "evidence_summary": "PMID:123 links TP53 to DNA repair decline in aging.",
-  "sources": ["PMID:123", "PMC456"]
-}}
-```
-
-Return a JSON array of genes. Minimum score threshold: 5.
-"""
-
-PHASE2_CRITIQUE_PROMPT = """You are a quality evaluator for gene evidence research.
-
-## Task
-Evaluate gene evidence for biological process: {biological_process}
-
-## Genes Found
-{genes_json}
-
-## Evaluation Criteria
-1. Count: Should have 20+ genes (for this single process)
-2. Evidence: Each gene must have sources and evidence summary
-3. Relevance: Genes must be directly relevant to the biological process
-
-## Output Format
-Return ONLY JSON:
-```json
-{{
-  "grade": "pass|fail",
-  "comment": "brief explanation",
-  "follow_up_queries": ["query1", "query2"]
-}}
-```
-
-Return JSON only, no additional text.
-"""
-
-PHASE2_GO_MAPPING_PROMPT = """You are a Gene Ontology term mapper for biological processes.
-
-## Task
-Find GO biological process terms related to: {biological_process}
-
-## Context
-- This is part of aging hallmark: {hallmark_name}
-- GO terms must have namespace "biological_process"
-- Return the most relevant terms (relevance score 6+)
-
-## GO Term Scoring (1-10)
-- 9-10: Exact match or core concept
-- 7-8: Highly relevant
-- 5-6: Moderately relevant
-- 1-4: Weakly related
-
-## Output Format
-Return JSON array:
-```json
-{{
-  "go_id": "GO:0006915",
-  "go_label": "apoptotic process",
-  "relevance_score": 8,
-  "evidence_summary": "Directly related to programmed cell death in aging."
-}}
-```
-
-Return JSON only, no additional text.
-"""
-```
+| Prompt | Purpose | Input Variables | Output |
+|--------|---------|-----------------|--------|
+| `PHASE2_RESEARCH_SYSTEM_PROMPT` | Guide autonomous research loop | `biological_process`, `hallmark_name`, `tool_descriptions` | - |
+| `PHASE2_DECISION_USER_PROMPT` | Get LLM decisions on what to research | `current_iteration`, `max_iterations`, `phase`, `guidance`, `candidates_summary`, `recent_findings` | JSON with `actions`, `findings_notes` |
+| `PHASE2_SCORING_SYSTEM_PROMPT` | Final gene scoring | `biological_process`, `hallmark_name` | JSON array of scored genes |
+| `PHASE2_CRITIQUE_SYSTEM_PROMPT` | Evaluate gene evidence | `biological_process`, `genes_json` | JSON with `grade`, `comment`, `follow_up_queries` |
+| `PHASE2_GO_MAPPING_SYSTEM_PROMPT` | Map GO terms to processes | `biological_process`, `hallmark_name` | JSON array of GO terms |
 
 **Notes:**
-- These prompts are more detailed than Copilot's versions
-- Explicitly request JSON output for structured parsing
-- Include clear scoring rubrics
-- Document expected input variables (e.g., `{hallmark_name}`, `{processes_json}`)
+- All prompts explicitly request JSON output for structured parsing
+- Prompts include clear scoring rubrics
+- See `src/aging_bd_agentic_system/llm/prompts.py` for full implementations
 
 ---
 
@@ -611,12 +436,15 @@ LLM Response: LLM integration works
 
 ## Phase 1 Completion Checklist
 
-- [ ] Dependencies added to `pyproject.toml` and `uv sync` completed
-- [ ] `llm/` module created with all 4 files
-- [ ] `.env.example` updated with Vertex AI configuration
-- [ ] Actual `.env` file contains your `VERTEX_PROJECT_ID`
-- [ ] Test script `scripts/test_llm.py` created and passes
-- [ ] Can successfully import and use `get_llm()` from Python
+- [x] Dependencies added to `pyproject.toml` and `uv sync` completed
+- [x] `llm/` module created with all 4 files (`__init__.py`, `client.py`, `providers.py`, `prompts.py`)
+- [x] `config/` module with `config.py` containing `RunConfig`, `Phase1Config`, `Phase2Config` dataclasses
+- [x] `config/default.yaml` created for default configuration
+- [x] `.env.example` updated (secrets only: API keys, project IDs)
+- [x] Actual `.env` file contains your `VERTEX_PROJECT_ID`
+- [x] Test script `scripts/test_llm.py` created and passes
+- [x] Can successfully import and use `get_llm()` from Python
+- [x] Config travels through `state["config"]` to all agents
 
 ---
 

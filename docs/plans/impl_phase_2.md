@@ -1,71 +1,112 @@
 # Phase 2 — Agent Intelligence
 
+**Status:** ✅ Complete. This plan documents the implemented LLM-powered agent system.
+
 **Goal:** Rewrite agent nodes to use LLM-powered reasoning instead of deterministic keyword extraction.
 
 **Reference:** `/home/rohitpc/projects/aging_bd_agentic_system/docs/langgraph-deep-research/` for ADK deep-research patterns
 
 ---
 
-## 2.1 Understand What Needs To Change
+## 2.1 Implementation Summary
 
-**Current (Copilot's implementation):**
-- `phase1_research`: Uses hardcoded `PHASE1_KEYWORDS` dict for keyword matching
-- `phase1_critic`: Rule-based validation (count checks, field existence)
-- `phase2_research`: Iterates through candidates, counts PubMed hits for scoring
-- `phase2_critic`: Rule-based validation (gene count thresholds)
+**Phase 1 Agents (Implemented):**
+- `phase1_plan` → LLM generates research goals with tool-specific search terms
+- `phase1_research` → LLM extracts processes from evidence, consumes plan
+- `phase1_critic` → Two-step: unstructured critique → structured recommendations
+- `phase1_refine` → Re-runs research with critic recommendations
+- `phase1_finalize` → Sorts and creates BP queue
 
-**Target (LLM-powered):**
-- `phase1_research`: LLM analyzes corpus results + Lopez-Otin context to extract processes
-- `phase1_critic`: LLM evaluates quality, coverage, distinctness of processes
-- `phase2_research`: LLM synthesizes evidence from multiple sources for each gene
-- `phase2_critic`: LLM judges if sufficient gene evidence was collected
+**Phase 2 Agents (Implemented):**
+- `select_bp` → Selects BP from queue
+- `phase2_research` → ReAct loop with LLM-guided tool selection
+- `phase2_critic` → Evaluates gene evidence quality
+- `phase2_refine` → Executes follow-up searches
+- `map_go_terms` → Maps genes to GO terms
+- `advance_bp` → Moves to next BP
 
 ---
 
-## 2.2 Phase 1 Agent Rewrite
+## 2.2 Configuration System
 
-**File to completely rewrite:** `src/aging_bd_agentic_system/agents/phase1_bp_identifier.py`
-
-### 2.2.1 New `phase1_research` Node
-
-**Old approach:**
-- Scan vector DB results for keywords like "methylation", "chromatin"
-- Use keyword dictionary to map to process names
-- Score by counting PubMed hits
-
-**New approach:**
-1. Call vector DB to get relevant literature chunks
-2. Pass chunks + Lopez-Otin context + hallmark to LLM
-3. LLM extracts biological processes with evidence summaries and scores
-4. Return structured list of processes
-
-**Implementation:**
+**All agents read config from `state["config"]`:**
 
 ```python
-"""
-Phase 1 Agent: Biological Process Identification
+# Reading config in any agent
+cfg = state.get("config", {})
+p1 = cfg.get("phase1", {})
+max_iterations = p1.get("max_iterations", 2)
+```
 
-Uses LLM-powered reasoning to identify biological processes for aging hallmarks.
-"""
+**Phase 1 Config:**
+- `min_research_goals`, `max_research_goals`
+- `vector_db_top_k`, `pubmed_retmax`
+- `max_iterations`, `max_processes`
 
-from __future__ import annotations
+**Phase 2 Config:**
+- `max_research_iterations`, `max_refine_iterations`
+- `genage_seed_max_results`, `opengenes_seed_max_results`
+- `pubmed_max_results`, `vector_db_max_results`
 
-import json
-from typing import Any
+---
 
-from aging_bd_agentic_system.llm import get_llm
-from aging_bd_agentic_system.llm.prompts import PHASE1_SYSTEM_PROMPT
-from aging_bd_agentic_system.literature_pipeline import config
-from aging_bd_agentic_system.tools import query_pubmed, query_vector_db
+## 2.3 Phase 1 Agent Implementation
 
+**File:** `src/aging_bd_agentic_system/agents/phase1_bp_identifier.py`
 
-def load_lopez_otin_context(state: dict[str, Any]) -> dict[str, Any]:
-    """Load the Lopez-Otin paper text into state if missing."""
-    if state.get("lopez_otin_context"):
-        return {}
-    path = config.DATA_DIR / "lopez-otin-22.md"
-    text = path.read_text(encoding="utf-8")
-    return {"lopez_otin_context": text}
+### 2.3.1 Workflow
+
+```
+load_lopez_otin_context → phase1_plan → phase1_research → phase1_critic
+                                                          ↓
+                                              phase1_refine (if fail)
+                                                          ↓
+                                              phase1_finalize
+```
+
+### 2.3.2 Two-Step Critic
+
+The critic uses two prompts:
+1. `PHASE1_CRITIC_UNSTRUCTURED_PROMPT` → Free-form review (~100 words)
+2. `PHASE1_CRITIC_STRUCTURED_PROMPT` → JSON with `grade`, `vector_db_queries`, `pubmed_queries`, `focus_areas`
+
+State fields:
+- `phase1_critique` → Unstructured text
+- `phase1_critic_recommendations` → Structured JSON
+
+---
+
+## 2.4 Phase 2 Agent Implementation
+
+**File:** `src/aging_bd_agentic_system/agents/phase2_gene_researcher.py`
+
+### 2.4.1 Workflow
+
+```
+select_bp → phase2_research (loops) → phase2_critic → phase2_refine (if fail)
+                        ↑                    ↓
+                        └────────────────────┘
+                                             ↓
+                                     map_go_terms → advance_bp
+```
+
+### 2.4.2 ReAct Research Loop
+
+The `phase2_research` function implements an autonomous research loop:
+- Iteration 0: Seed genes from GenAge/OpenGenes
+- Iterations 1-6: LLM decides what to search
+- Final iteration: Score genes using `PHASE2_SCORING_SYSTEM_PROMPT`
+
+### 2.4.3 Node Functions
+
+| Function | Description |
+|----------|-------------|
+| `select_bp` | Select next BP from queue |
+| `phase2_research` | ReAct research loop (seeds on iter 0, researches, scores on final) |
+| `phase2_critic` | Evaluate gene evidence |
+| `phase2_refine` | Execute follow-up searches |
+| `map_go_terms` | Map genes to GO terms |
+| `advance_bp` | Log BP completion, advance to next |
 
 
 def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
@@ -1264,43 +1305,49 @@ Or keep them for reference but they won't be used.
 
 ## Phase 2 Completion Checklist
 
-- [ ] `phase1_bp_identifier.py` completely rewritten with LLM calls
-- [ ] `phase2_gene_researcher.py` completely rewritten with autonomous ReAct research loop
-- [ ] `helpers.py` simplified (removed logging functions)
-- [ ] All agent nodes use `get_llm()` from llm module
-- [ ] Prompts consolidated in `llm/prompts.py`
-- [ ] Structured output with fallback to JSON parsing
-- [ ] Error handling for LLM failures
-- [ ] Environment variables added for iteration configuration
-- [ ] Routing logic implements ReAct loop with configurable max iterations
-- [ ] State schema includes `phase2_research_iteration` field
-- [ ] **Context management integrated** (context_manager.summarize_if_needed called)
-- [ ] **Findings selection fixed** (recent 10 instead of first 10)
-- [ ] **System prompts used properly** (SystemMessage + HumanMessage separation)
-- [ ] **Persistent logging implemented** (audit_logger for BP/workflow completion)
-- [ ] **Full state output** (full_state.json written to outputs/{hallmark}/)
+- [x] `phase1_bp_identifier.py` rewritten with LLM calls and two-step critic
+- [x] `phase2_gene_researcher.py` rewritten with autonomous ReAct research loop
+- [x] All agent nodes use `get_llm()` from llm module
+- [x] Prompts consolidated in `llm/prompts.py`
+- [x] Structured output with fallback to JSON parsing
+- [x] Error handling for LLM failures
+- [x] Configuration via `state["config"]` (not environment variables)
+- [x] Routing logic implements ReAct loop with configurable max iterations
+- [x] State schema includes `phase2_research_iteration` field
+- [x] Context management integrated (`context_manager.summarize_if_needed`)
+- [x] Persistent logging implemented (`audit_logger` for BP/workflow completion)
+- [x] Full state output (`full_state.json` written to `outputs/{hallmark}/`)
 
 ---
 
 ## Configuration Summary
 
-**All configurable iteration limits (via `.env`):**
+**All configurable parameters via `state["config"]`:**
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PHASE1_MAX_ITERATIONS` | 3 | Phase 1 critique/refine loops |
-| `PHASE2_RESEARCH_MAX_ITERATIONS` | 7 | Phase 2 autonomous research loop (per BP) |
-| `PHASE2_REFINE_MAX_ITERATIONS` | 3 | Phase 2 refinement after critique |
+| Config Path | Default | Purpose |
+|-------------|---------|---------|
+| `phase1.max_iterations` | 2 | Phase 1 critique/refine loops |
+| `phase1.max_processes` | 15 | Max final BP count |
+| `phase1.vector_db_top_k` | 20 | Vector DB results per query |
+| `phase1.pubmed_retmax` | 10 | PubMed results per query |
+| `phase2.max_research_iterations` | 7 | Research loop iterations per BP |
+| `phase2.max_refine_iterations` | 3 | Refinement after critique |
+| `phase2.genage_seed_max_results` | 50 | GenAge seeding results |
+| `phase2.opengenes_seed_max_results` | 50 | OpenGenes seeding results |
 
-**Total worst-case iterations per hallmark:**
-- Phase 1: 3 research cycles
-- Phase 2: 15 BPs × (7 research + 3 refine) = 150 iterations
-- **Total: ~153 LLM calls per hallmark**
+**Config hierarchy:** RunConfig defaults → YAML file → CLI arguments
 
-**To adjust for cost/time:**
-- Reduce `PHASE2_RESEARCH_MAX_ITERATIONS` to 5 for faster runs
-- Reduce `PHASE2_REFINE_MAX_ITERATIONS` to 2 to limit refinement
-- These are trade-offs between thoroughness and speed
+**Usage:**
+```bash
+# Using defaults
+python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
+
+# With custom config
+python -m aging_bd_agentic_system.main --hallmark "..." --config config/fast.yaml
+
+# With CLI overrides
+python -m aging_bd_agentic_system.main --hallmark "..." --max-research-iterations 5
+```
 
 ---
 
@@ -1320,14 +1367,8 @@ python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
 5. GO terms are mapped with relevance scores
 6. Outputs written to `outputs/{hallmark}/`
 
-**Expected improvement over Copilot's version:**
-- Better quality process names (LLM extracts, not keyword matches)
-- More nuanced scoring (LLM judgment, not hit counts)
-- Richer evidence summaries (LLM synthesizes, not concatenates)
-- More adaptive refinement (LLM identifies gaps, not fixed rules)
-
 ---
 
 ## Next Phase
 
-After completing Phase 2, proceed to **Phase 3 — Observability**, where we'll replace manual JSONL logging with LangGraph callback-based tracing.
+Phase 2 is complete. See **Phase 3 — Observability** for tracing implementation.

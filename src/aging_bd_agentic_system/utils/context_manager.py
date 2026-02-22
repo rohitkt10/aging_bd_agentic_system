@@ -18,7 +18,6 @@ from aging_bd_agentic_system.llm.prompts import (
     PHASE2_SCORING_SUMMARY_PROMPT,
 )
 
-
 # Schema constants for structured output validation
 ACTIONABILITY_SUMMARY_SCHEMA = {
     "title": "actionability_summary",
@@ -62,7 +61,13 @@ ACTIONABILITY_SUMMARY_SCHEMA = {
             "required": ["current_iteration", "total_candidates", "total_findings"],
         },
     },
-    "required": ["top_candidates", "high_value_findings", "research_gaps", "covered_topics", "iteration_state"],
+    "required": [
+        "top_candidates",
+        "high_value_findings",
+        "research_gaps",
+        "covered_topics",
+        "iteration_state",
+    ],
 }
 
 
@@ -86,7 +91,12 @@ SCORING_SUMMARY_SCHEMA = {
                                 "strength": {"type": "string"},
                                 "pmid_or_ref": {"type": "string"},
                             },
-                            "required": ["source", "finding", "strength", "pmid_or_ref"],
+                            "required": [
+                                "source",
+                                "finding",
+                                "strength",
+                                "pmid_or_ref",
+                            ],
                         },
                     },
                     "contradicting_evidence": {
@@ -99,7 +109,12 @@ SCORING_SUMMARY_SCHEMA = {
                                 "strength": {"type": "string"},
                                 "pmid_or_ref": {"type": "string"},
                             },
-                            "required": ["source", "finding", "strength", "pmid_or_ref"],
+                            "required": [
+                                "source",
+                                "finding",
+                                "strength",
+                                "pmid_or_ref",
+                            ],
                         },
                     },
                     "cross_source_corroboration": {"type": "boolean"},
@@ -118,7 +133,12 @@ SCORING_SUMMARY_SCHEMA = {
         "total_genes_with_evidence": {"type": "integer"},
         "total_sources_queried": {"type": "integer"},
     },
-    "required": ["candidate_evidence", "evidence_summary", "total_genes_with_evidence", "total_sources_queried"],
+    "required": [
+        "candidate_evidence",
+        "evidence_summary",
+        "total_genes_with_evidence",
+        "total_sources_queried",
+    ],
 }
 
 
@@ -163,12 +183,15 @@ def _fallback_actionability_summary(research_data: dict, state: dict) -> dict:
         confidence = 7 if source in ["genage", "opengenes"] else 5
         confidence += min(mention_count // 2, 3)
 
-        top_candidates.append({
-            "symbol": symbol,
-            "source": source,
-            "confidence": min(confidence, 10),
-            "key_evidence": f"Seed from {source}" + (f", mentioned in {mention_count} findings" if mention_count else ""),
-        })
+        top_candidates.append(
+            {
+                "symbol": symbol,
+                "source": source,
+                "confidence": min(confidence, 10),
+                "key_evidence": f"Seed from {source}"
+                + (f", mentioned in {mention_count} findings" if mention_count else ""),
+            }
+        )
 
     # High-value findings: recent ones from quality sources
     high_value_findings = []
@@ -180,12 +203,14 @@ def _fallback_actionability_summary(research_data: dict, state: dict) -> dict:
         # Score: GenAge/OpenGenes = 8, PubMed = 7, corpus = 6
         value_score = {"genage": 8, "opengenes": 8, "pubmed": 7}.get(source.lower(), 6)
 
-        high_value_findings.append({
-            "gene": gene,
-            "source": source,
-            "finding": finding_text[:200],
-            "value_score": value_score,
-        })
+        high_value_findings.append(
+            {
+                "gene": gene,
+                "source": source,
+                "finding": finding_text[:200],
+                "value_score": value_score,
+            }
+        )
 
     return {
         "top_candidates": top_candidates,
@@ -230,7 +255,11 @@ def _fallback_scoring_summary(research_data: dict) -> dict:
             continue
 
         if gene not in gene_evidence:
-            gene_evidence[gene] = {"supporting": [], "contradicting": [], "sources": set()}
+            gene_evidence[gene] = {
+                "supporting": [],
+                "contradicting": [],
+                "sources": set(),
+            }
 
         source = f.get("source", "unknown")
         finding_text = f.get("finding", "")
@@ -239,25 +268,29 @@ def _fallback_scoring_summary(research_data: dict) -> dict:
         strength_map = {"genage": "strong", "opengenes": "strong", "pubmed": "moderate"}
         strength = strength_map.get(source.lower(), "weak")
 
-        gene_evidence[gene]["supporting"].append({
-            "source": source,
-            "finding": finding_text[:300],
-            "strength": strength,
-            "pmid_or_ref": source,
-        })
+        gene_evidence[gene]["supporting"].append(
+            {
+                "source": source,
+                "finding": finding_text[:300],
+                "strength": strength,
+                "pmid_or_ref": source,
+            }
+        )
         gene_evidence[gene]["sources"].add(source)
 
     # Build candidate_evidence array
     candidate_evidence = []
     for symbol, evidence in gene_evidence.items():
         sources_list = list(evidence["sources"])
-        candidate_evidence.append({
-            "gene_symbol": symbol,
-            "supporting_evidence": evidence["supporting"],
-            "contradicting_evidence": evidence["contradicting"],
-            "cross_source_corroboration": len(sources_list) >= 2,
-            "evidence_strength_score": min(5 + len(evidence["supporting"]) // 3, 9),
-        })
+        candidate_evidence.append(
+            {
+                "gene_symbol": symbol,
+                "supporting_evidence": evidence["supporting"],
+                "contradicting_evidence": evidence["contradicting"],
+                "cross_source_corroboration": len(sources_list) >= 2,
+                "evidence_strength_score": min(5 + len(evidence["supporting"]) // 3, 9),
+            }
+        )
 
     return {
         "candidate_evidence": candidate_evidence,
@@ -282,7 +315,9 @@ def summarize_for_actionability(research_data: dict, state: dict) -> dict:
         Structured actionability summary with top candidates, high-value findings, gaps
     """
     # Check if LLM summarization is disabled
-    use_llm_summarization = os.environ.get("USE_LLM_SUMMARIZATION", "true").lower() == "true"
+    use_llm_summarization = (
+        os.environ.get("USE_LLM_SUMMARIZATION", "true").lower() == "true"
+    )
 
     if not use_llm_summarization:
         return _fallback_actionability_summary(research_data, state)
@@ -298,10 +333,10 @@ def summarize_for_actionability(research_data: dict, state: dict) -> dict:
         summary = llm.invoke_structured(
             user_prompt,
             schema=ACTIONABILITY_SUMMARY_SCHEMA,
-            system_prompt="You are a research context analyzer."
+            system_prompt="You are a research context analyzer.",
         )
         return summary
-    except Exception as e:
+    except Exception:
         # Fallback to rule-based
         return _fallback_actionability_summary(research_data, state)
 
@@ -321,7 +356,9 @@ def summarize_for_scoring(research_data: dict, biological_process: str) -> dict:
         Structured evidence summary with all supporting/contradicting evidence
     """
     # Check if LLM summarization is disabled
-    use_llm_summarization = os.environ.get("USE_LLM_SUMMARIZATION", "true").lower() == "true"
+    use_llm_summarization = (
+        os.environ.get("USE_LLM_SUMMARIZATION", "true").lower() == "true"
+    )
 
     if not use_llm_summarization:
         return _fallback_scoring_summary(research_data)
@@ -331,17 +368,17 @@ def summarize_for_scoring(research_data: dict, biological_process: str) -> dict:
     # Build user prompt with research data
     user_prompt = PHASE2_SCORING_SUMMARY_PROMPT.format(
         biological_process=biological_process,
-        research_data_json=json.dumps(research_data, indent=2, default=str)
+        research_data_json=json.dumps(research_data, indent=2, default=str),
     )
 
     try:
         summary = llm.invoke_structured(
             user_prompt,
             schema=SCORING_SUMMARY_SCHEMA,
-            system_prompt="You are an evidence synthesis specialist."
+            system_prompt="You are an evidence synthesis specialist.",
         )
         return summary
-    except Exception as e:
+    except Exception:
         # Fallback to rule-based
         return _fallback_scoring_summary(research_data)
 
@@ -363,11 +400,13 @@ def summarize_if_needed(
     scratchpad = state.get("research_scratchpad", "")
 
     # Calculate token count
-    blob = "\n".join([
-        " ".join([str(item) for item in tool_history]),
-        " ".join([str(item) for item in reasoning]),
-        scratchpad,
-    ])
+    blob = "\n".join(
+        [
+            " ".join([str(item) for item in tool_history]),
+            " ".join([str(item) for item in reasoning]),
+            scratchpad,
+        ]
+    )
 
     token_count = estimate_tokens(blob)
 
@@ -377,7 +416,11 @@ def summarize_if_needed(
 
     # Parse research data from scratchpad
     try:
-        research_data = json.loads(scratchpad) if scratchpad else {"initial_database_genes": [], "research_findings": []}
+        research_data = (
+            json.loads(scratchpad)
+            if scratchpad
+            else {"initial_database_genes": [], "research_findings": []}
+        )
     except json.JSONDecodeError:
         research_data = {"initial_database_genes": [], "research_findings": []}
 

@@ -16,7 +16,11 @@ class FakeLLMProvider:
     Returns predictable responses without making actual API calls.
     """
 
-    def __init__(self, responses: list[str] | None = None, structured_responses: list[dict[str, Any]] | None = None):
+    def __init__(
+        self,
+        responses: list[str] | None = None,
+        structured_responses: list[dict[str, Any]] | None = None,
+    ):
         """
         Initialize fake provider with predetermined responses.
 
@@ -51,7 +55,9 @@ class FakeLLMProvider:
         preview = prompt[:100] + "..." if len(prompt) > 100 else prompt
         return f"Fake LLM response to: {preview}"
 
-    def invoke_structured(self, prompt: str, schema: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    def invoke_structured(
+        self, prompt: str, schema: dict[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
         """
         Return a fake structured response.
 
@@ -67,7 +73,9 @@ class FakeLLMProvider:
 
         # If structured_responses provided, cycle through them
         if self.structured_responses:
-            return self.structured_responses[(self.structured_call_count - 1) % len(self.structured_responses)]
+            return self.structured_responses[
+                (self.structured_call_count - 1) % len(self.structured_responses)
+            ]
 
         # Try to create a minimal valid response based on schema
         if "type" in schema:

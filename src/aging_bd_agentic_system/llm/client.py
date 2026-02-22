@@ -111,7 +111,7 @@ class LLMClient:
         schema: dict[str, Any],
         *,
         system_prompt: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """
         Invoke the LLM with structured output.

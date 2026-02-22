@@ -101,6 +101,104 @@ Rules for merge_instructions:
 Return JSON only, no additional text.
 """
 
+# ===== PHASE 1 PLANNING PROMPT =====
+
+PHASE1_PLAN_SYSTEM_PROMPT = """You are an expert research planner for aging biology.
+
+## Task
+Create a research plan to identify biological processes for the aging hallmark: {hallmark_name}
+
+## Available Research Tools
+You have access to these tools for conducting research:
+
+### 1. query_vector_db
+- Searches a curated literature corpus (aging-related papers)
+- Good for: mechanistic explanations, broad biological concepts, pathway context
+- Query accepts: biological concepts, processes, or phrases (e.g., "autophagy", "DNA methylation")
+
+### 2. query_pubmed
+- Searches PubMed for recent scientific literature
+- Good for: recent studies, specific mechanisms, gene-function relationships
+- Query accepts: search strings with boolean operators (e.g., "DNA methylation AND aging")
+
+## Your Goal
+Generate {min_goals}-{max_goals} research goals. For each goal, suggest specific search terms for both tools.
+
+## Good Research Goals
+- Specific to the hallmark's molecular/cellular mechanisms
+- Actionable search directions
+- Cover different aspects of the hallmark
+
+## Output Format
+Return ONLY JSON:
+```json
+{{
+  "research_goals": [
+    {{
+      "goal": "Investigate DNA methylation changes in aging",
+      "vector_db_terms": ["DNA methylation aging", "epigenetic clock"],
+      "pubmed_terms": ["DNA methylation AND aging AND mechanism"]
+    }}
+  ]
+}}
+```
+
+Return JSON only, no additional text.
+"""
+
+# ===== PHASE 1 CRITIC PROMPTS (TWO-STEP) =====
+
+PHASE1_CRITIC_UNSTRUCTURED_PROMPT = """You are a quality evaluator reviewing biological processes for the aging hallmark: {hallmark_name}
+
+## Context
+- This is iteration {current_iteration} of {max_iterations}
+- A "pass" grade means no more refinement is needed
+- If this is the last iteration ({max_iterations}), be practical about what can be achieved
+
+## Processes to Review
+{processes_json}
+
+## Your Task
+Write a brief critique (~100 words) of this list. Consider:
+- Are there obvious gaps or missing themes?
+- Is there redundancy or overlap?
+- Is evidence quality adequate?
+- Are these mechanistic processes (not outcomes)?
+
+Be direct and actionable. This is a first pass, so some rough edges are expected.
+"""
+
+PHASE1_CRITIC_STRUCTURED_PROMPT = """Based on the following critique of biological processes, extract structured recommendations.
+
+## Critique
+{critique_text}
+
+## Processes Being Reviewed
+{processes_json}
+
+## Your Task
+Parse the critique and output structured tool recommendations for refinement.
+
+## Output Format
+Return ONLY JSON:
+```json
+{{
+  "grade": "pass|fail",
+  "vector_db_queries": ["query1", "query2"],
+  "pubmed_queries": ["query1", "query2"],
+  "focus_areas": ["area needing more research", "another area"]
+}}
+```
+
+Rules:
+- grade "pass" if the list is adequate (even if not perfect)
+- Only provide queries if grade is "fail"
+- Queries should be specific and actionable
+- focus_areas describe what needs more research (not search terms)
+
+Return JSON only, no additional text.
+"""
+
 # ===== PHASE 2 TOOL DESCRIPTIONS =====
 
 # Detailed tool descriptions for LLM decision-making

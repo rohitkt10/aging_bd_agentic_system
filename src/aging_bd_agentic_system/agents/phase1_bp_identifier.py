@@ -2,6 +2,14 @@
 Phase 1 Agent: Biological Process Identification
 
 Uses LLM-powered reasoning to identify biological processes for aging hallmarks.
+
+Workflow:
+1. load_lopez_otin_context - Load reference paper
+2. phase1_plan - Generate research plan with tool-specific search terms
+3. phase1_research - Execute plan and identify BPs
+4. phase1_critic - Two-step review (unstructured + structured)
+5. phase1_refine - Execute refinement based on critic recommendations
+6. phase1_finalize - Sort and create BP queue for Phase 2
 """
 
 from __future__ import annotations
@@ -9,14 +17,162 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from aging_bd_agentic_system.llm import get_llm
-from aging_bd_agentic_system.llm.prompts import PHASE1_CRITIQUE_PROMPT, PHASE1_SYSTEM_PROMPT
 from aging_bd_agentic_system.literature_pipeline import config
+from aging_bd_agentic_system.llm import get_llm
+from aging_bd_agentic_system.llm.prompts import (
+    PHASE1_CRITIC_STRUCTURED_PROMPT,
+    PHASE1_CRITIC_UNSTRUCTURED_PROMPT,
+    PHASE1_PLAN_SYSTEM_PROMPT,
+    PHASE1_SYSTEM_PROMPT,
+)
 from aging_bd_agentic_system.tools import query_pubmed, query_vector_db
+
+# =============================================================================
+# SCHEMA DEFINITIONS
+# =============================================================================
+
+RESEARCH_PLAN_SCHEMA = {
+    "title": "research_plan",
+    "type": "object",
+    "properties": {
+        "research_goals": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string"},
+                    "vector_db_terms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "pubmed_terms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["goal", "vector_db_terms", "pubmed_terms"],
+            },
+        }
+    },
+    "required": ["research_goals"],
+}
+
+BIOLOGICAL_PROCESS_SCHEMA = {
+    "title": "biological_processes",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "process_name": {"type": "string"},
+            "evidence_score": {"type": "integer"},
+            "evidence_summary": {"type": "string"},
+            "sources": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "process_name",
+            "evidence_score",
+            "evidence_summary",
+            "sources",
+        ],
+    },
+}
+
+CRITIC_STRUCTURED_SCHEMA = {
+    "title": "critic_recommendations",
+    "type": "object",
+    "properties": {
+        "grade": {"type": "string", "enum": ["pass", "fail"]},
+        "vector_db_queries": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "pubmed_queries": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "focus_areas": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": ["grade", "vector_db_queries", "pubmed_queries", "focus_areas"],
+}
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+
+def _extract_json_from_response(response: str) -> Any:
+    """
+    Extract JSON from LLM response that may contain extra text.
+
+    Looks for JSON array [...] or object {...} patterns.
+    """
+    # Try array first
+    json_start = response.find("[")
+    json_end = response.rfind("]") + 1
+    if json_start >= 0 and json_end > json_start:
+        return json.loads(response[json_start:json_end])
+
+    # Try object
+    json_start = response.find("{")
+    json_end = response.rfind("}") + 1
+    if json_start >= 0 and json_end > json_start:
+        return json.loads(response[json_start:json_end])
+
+    raise ValueError("No valid JSON found in response")
+
+
+def _format_corpus_results(results: list[dict]) -> str:
+    """Format vector DB results for LLM context."""
+    return "\n".join(
+        [
+            f"PMID: {rec.get('pmid', 'unknown')}\n{rec.get('text', '')}"
+            for rec in results
+        ]
+    )
+
+
+def _format_pubmed_results(results: list[dict]) -> str:
+    """Format PubMed results for LLM context."""
+    lines = []
+    for rec in results:
+        pmid = rec.get("pmid")
+        title = rec.get("title", "")
+        abstract = rec.get("abstract", "")
+        lines.append(f"PMID:{pmid} - {title}\n{abstract}")
+    return "\n".join(lines)
+
+
+def _deduplicate_processes(processes: list[dict]) -> list[dict]:
+    """Remove duplicate biological processes by name (case-insensitive)."""
+    seen = set()
+    unique = []
+    for proc in processes:
+        name_lower = proc.get("process_name", "").lower().strip()
+        if name_lower not in seen:
+            seen.add(name_lower)
+            unique.append(proc)
+    return unique
+
+
+# =============================================================================
+# MAIN FUNCTIONS
+# =============================================================================
 
 
 def load_lopez_otin_context(state: dict[str, Any]) -> dict[str, Any]:
-    """Load the Lopez-Otin paper text into state if missing."""
+    """
+    Load the Lopez-Otin paper text into state if missing.
+
+    Args:
+        state: Workflow state
+
+    Returns:
+        Dict with lopez_otin_context if not already loaded
+    """
     if state.get("lopez_otin_context"):
         return {}
     path = config.DATA_DIR / "lopez-otin-22.md"
@@ -25,134 +181,165 @@ def load_lopez_otin_context(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
-    """Create a research plan for Phase 1 using LLM."""
+    """
+    Generate a structured research plan with tool-specific search terms.
+
+    The plan includes research goals with suggested search terms for both
+    vector_db and pubmed tools.
+
+    Args:
+        state: Workflow state with hallmark_name, lopez_otin_context, and config
+
+    Returns:
+        Dict with phase1_plan containing research_goals list
+    """
     hallmark = state["hallmark_name"].strip()
     lopez_context = state.get("lopez_otin_context", "")
 
-    prompt = f"""Based on the hallmark "{hallmark}", create a research plan to identify biological processes.
+    # Read config from state
+    cfg = state.get("config", {})
+    p1 = cfg.get("phase1", {})
+    min_research_goals = p1.get("min_research_goals", 4)
+    max_research_goals = p1.get("max_research_goals", 6)
 
-Context from Lopez-Otin paper:
-{lopez_context[:2000]}...
+    system_prompt = PHASE1_PLAN_SYSTEM_PROMPT.format(
+        hallmark_name=hallmark,
+        min_goals=min_research_goals,
+        max_goals=max_research_goals,
+    )
 
-Output a JSON list of 4-6 research goals:
-```json
-["goal 1", "goal 2", ...]
-```
+    user_prompt = f"""## Reference Context
+
+### Lopez-Otin Hallmarks Paper
+{lopez_context}
+
+Generate a research plan for identifying biological processes related to "{hallmark}".
 """
 
     llm = get_llm()
-    response = llm.invoke(prompt)
 
-    # Parse JSON response
     try:
-        # Extract JSON from response (in case LLM adds extra text)
-        json_start = response.find("[")
-        json_end = response.rfind("]") + 1
-        if json_start >= 0 and json_end > json_start:
-            json_str = response[json_start:json_end]
-            plan = json.loads(json_str)
-        else:
-            # Fallback to default plan
-            plan = [
-                f"Review Lopez-Otin context for {hallmark} mechanisms",
-                f"Search corpus for {hallmark} and related processes",
-                "Cross-check candidate processes in PubMed",
-                "Rank processes by strength of evidence",
-            ]
-    except json.JSONDecodeError:
-        # Fallback to default plan
-        plan = [
-            f"Review Lopez-Otin context for {hallmark} mechanisms",
-            f"Search corpus for {hallmark} and related processes",
-            "Cross-check candidate processes in PubMed",
-            "Rank processes by strength of evidence",
-        ]
+        plan = llm.invoke_structured(
+            user_prompt, schema=RESEARCH_PLAN_SCHEMA, system_prompt=system_prompt
+        )
+    except Exception as e:
+        # Fallback: try to parse JSON from text response
+        print(f"Structured output failed ({e}), falling back to JSON parsing")
+        response = llm.invoke(user_prompt, system_prompt=system_prompt)
+        plan = _extract_json_from_response(response)
 
     return {"phase1_plan": plan}
 
 
 def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Use LLM to identify biological processes from corpus and context.
+    Execute the research plan and identify biological processes.
 
-    Process:
-    1. Query vector DB for relevant literature
-    2. Query Lopez-Otin paper
-    3. Pass evidence to LLM with structured prompt
-    4. LLM returns list of biological processes with evidence
+    Consumes the plan from phase1_plan and executes searches using the
+    suggested search terms. Produces a liberal list of BPs (duplicates removed).
+
+    Args:
+        state: Workflow state with phase1_plan and config
+
+    Returns:
+        Dict with biological_processes list
     """
     hallmark = state["hallmark_name"].strip()
     lopez_context = state.get("lopez_otin_context", "")
+    plan = state.get("phase1_plan", {})
+    critic_recommendations = state.get("phase1_critic_recommendations", {})
 
-    # Step 1: Gather evidence from tools
-    vector_results = query_vector_db(query=hallmark, top_k=15)
+    # Read config from state
+    cfg = state.get("config", {})
+    p1 = cfg.get("phase1", {})
+    vector_db_top_k = p1.get("vector_db_top_k", 20)
+    pubmed_retmax = p1.get("pubmed_retmax", 10)
+    max_iterations = p1.get("max_iterations", 2)
 
-    # Get sample PubMed results for context (not for every process yet)
-    pubmed_results = query_pubmed(query=f"{hallmark} aging biological processes", retmax=10)
+    # Track iteration
+    current_iteration = state.get("phase1_iteration", 0) + 1
 
-    # Step 2: Build user context for LLM
+    # Gather evidence from multiple sources
+    all_corpus_results = []
+    all_pubmed_results = []
+
+    # 1. Execute searches from the plan (initial or refined)
+    research_goals = plan.get("research_goals", [])
+
+    for goal in research_goals:
+        # Vector DB searches
+        for term in goal.get("vector_db_terms", []):
+            results = query_vector_db(query=term, top_k=vector_db_top_k)
+            all_corpus_results.extend(results)
+
+        # PubMed searches
+        for term in goal.get("pubmed_terms", []):
+            results = query_pubmed(query=term, retmax=pubmed_retmax)
+            all_pubmed_results.extend(results)
+
+    # 2. Execute additional searches from critic recommendations (if refining)
+    if critic_recommendations:
+        for query in critic_recommendations.get("vector_db_queries", []):
+            results = query_vector_db(query=query, top_k=vector_db_top_k)
+            all_corpus_results.extend(results)
+
+        for query in critic_recommendations.get("pubmed_queries", []):
+            results = query_pubmed(query=query, retmax=pubmed_retmax)
+            all_pubmed_results.extend(results)
+
+    # 3. Build context for LLM
+    corpus_section = _format_corpus_results(all_corpus_results)
+    pubmed_section = _format_pubmed_results(all_pubmed_results)
+
+    # Include iteration context in prompt
+    iteration_context = ""
+    if current_iteration > 1:
+        iteration_context = f"""
+## Iteration Context
+This is iteration {current_iteration} of {max_iterations}.
+Focus on: {', '.join(critic_recommendations.get('focus_areas', []))}
+"""
+        if current_iteration == max_iterations:
+            iteration_context += (
+                "\nThis is the FINAL iteration. Produce the final list now."
+            )
+
     user_context = f"""## Reference Context
 
 ### Lopez-Otin Hallmarks Paper
-{lopez_context[:3000]}
+{lopez_context}
 
 ### Relevant Literature from Corpus
-{chr(10).join([f"Document: {rec.get('pmcid', 'unknown')}{chr(10)}{rec.get('text', '')[:500]}" for rec in vector_results[:10]])}
+{corpus_section}
 
 ### PubMed Search Results
-{chr(10).join([f"PMID:{rec.get('pmid')} - {rec.get('title', '')}{chr(10)}{rec.get('abstract', '')[:300]}" for rec in pubmed_results[:5]])}
-
-Based on this context, identify the biological processes.
+{pubmed_section}
+{iteration_context}
+Identify biological processes related to {hallmark} based on this evidence.
 """
 
-    # Step 3: Format system prompt with hallmark name
+    # 4. Call LLM to identify processes
     system_prompt = PHASE1_SYSTEM_PROMPT.format(hallmark_name=hallmark)
-
     llm = get_llm()
 
-    # Try structured output first
     try:
-        # Define schema for biological processes
-        schema = {
-            "title": "biological_processes",
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "process_name": {"type": "string"},
-                    "evidence_score": {"type": "integer"},
-                    "evidence_summary": {"type": "string"},
-                    "sources": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["process_name", "evidence_score", "evidence_summary", "sources"],
-            },
-        }
-
         processes = llm.invoke_structured(
             user_context,
-            schema=schema,
-            system_prompt=system_prompt
+            schema=BIOLOGICAL_PROCESS_SCHEMA,
+            system_prompt=system_prompt,
         )
-
     except Exception as e:
-        # Fallback: parse JSON from text response
         print(f"Structured output failed ({e}), falling back to JSON parsing")
         response = llm.invoke(user_context, system_prompt=system_prompt)
+        processes = _extract_json_from_response(response)
 
-        # Extract JSON from response
-        json_start = response.find("[")
-        json_end = response.rfind("]") + 1
-        if json_start >= 0 and json_end > json_start:
-            json_str = response[json_start:json_end]
-            processes = json.loads(json_str)
-        else:
-            raise ValueError("LLM did not return valid JSON array of processes")
-
-    # Step 4: Validate and return
+    # 5. Validate and deduplicate
     if not processes:
         raise ValueError("LLM returned empty process list")
 
-    # Add rank field
+    processes = _deduplicate_processes(processes)
+
+    # 6. Add rank field
     for idx, proc in enumerate(processes, start=1):
         proc["rank"] = idx
 
@@ -161,292 +348,111 @@ Based on this context, identify the biological processes.
 
 def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Use LLM to critique the quality of identified biological processes.
+    Two-step critique: unstructured review followed by structured recommendations.
 
-    LLM evaluates:
-    - Count (10-15 processes?)
-    - Evidence quality
-    - Distinctness (no duplicates/overlap)
-    - Specificity (mechanisms, not outcomes)
+    Step 1: Free-form text critique (~100 words)
+    Step 2: Structured output with pass/fail grade and tool recommendations
 
-    If count is off, LLM suggests specific splits/merges to adjust.
+    Args:
+        state: Workflow state with biological_processes and config
+
+    Returns:
+        Dict with phase1_critique (text) and phase1_critic_recommendations (structured)
     """
     hallmark = state["hallmark_name"]
     processes = state.get("biological_processes", [])
 
+    # Read config from state
+    cfg = state.get("config", {})
+    p1 = cfg.get("phase1", {})
+    max_iterations = p1.get("max_iterations", 2)
+
+    # Track iteration
+    current_iteration = state.get("phase1_iteration", 0) + 1
+
     if not processes:
         return {
-            "phase1_eval": {
+            "phase1_critique": "No biological processes identified.",
+            "phase1_critic_recommendations": {
                 "grade": "fail",
-                "comment": "No biological processes identified",
-                "missing_themes": ["all"],
-                "follow_up_queries": [f"{hallmark} aging biological processes mechanisms"],
-                "split_instructions": [],
-                "merge_instructions": [],
-            }
+                "vector_db_queries": [f"{hallmark} aging mechanism"],
+                "pubmed_queries": [f'"{hallmark}" AND aging AND mechanism'],
+                "focus_areas": ["all"],
+            },
         }
 
-    # Serialize processes for LLM (user message)
-    user_context = json.dumps(processes, indent=2)
-
-    # Format system prompt with variables
-    system_prompt = PHASE1_CRITIQUE_PROMPT.format(
-        hallmark_name=hallmark,
-        processes_json="{PROCESSES_JSON}"  # Placeholder, will be in user message
-    )
-
-    # Remove the processes_json from system prompt since it's now in user message
-    system_prompt = system_prompt.replace("{processes_json}", "See the processes in the user message.")
-
+    processes_json = json.dumps(processes, indent=2)
     llm = get_llm()
 
+    # Step 1: Unstructured critique
+    unstructured_prompt = PHASE1_CRITIC_UNSTRUCTURED_PROMPT.format(
+        hallmark_name=hallmark,
+        current_iteration=current_iteration,
+        max_iterations=max_iterations,
+        processes_json=processes_json,
+    )
+
+    critique_text = llm.invoke(unstructured_prompt)
+
+    # Step 2: Structured recommendations
+    structured_prompt = PHASE1_CRITIC_STRUCTURED_PROMPT.format(
+        critique_text=critique_text,
+        processes_json=processes_json,
+    )
+
     try:
-        # Try structured output with split/merge fields
-        schema = {
-            "title": "phase1_evaluation",
-            "type": "object",
-            "properties": {
-                "grade": {"type": "string", "enum": ["pass", "fail"]},
-                "comment": {"type": "string"},
-                "missing_themes": {"type": "array", "items": {"type": "string"}},
-                "follow_up_queries": {"type": "array", "items": {"type": "string"}},
-                "split_instructions": {"type": "array", "items": {"type": "string"}},
-                "merge_instructions": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["grade", "comment", "missing_themes", "follow_up_queries", "split_instructions", "merge_instructions"],
-        }
-
-        eval_result = llm.invoke_structured(
-            user_context,
-            schema=schema,
-            system_prompt=system_prompt
+        recommendations = llm.invoke_structured(
+            structured_prompt, schema=CRITIC_STRUCTURED_SCHEMA
         )
+    except Exception as e:
+        print(f"Structured output failed ({e}), falling back to JSON parsing")
+        response = llm.invoke(structured_prompt)
+        recommendations = _extract_json_from_response(response)
 
-    except Exception:
-        # Fallback to JSON parsing
-        response = llm.invoke(user_context, system_prompt=system_prompt)
-        json_start = response.find("{")
-        json_end = response.rfind("}") + 1
-        if json_start >= 0 and json_end > json_start:
-            json_str = response[json_start:json_end]
-            eval_result = json.loads(json_str)
-        else:
-            raise ValueError("LLM did not return valid JSON for evaluation")
-
-    return {"phase1_eval": eval_result}
+    return {
+        "phase1_critique": critique_text,
+        "phase1_critic_recommendations": recommendations,
+    }
 
 
 def phase1_refine(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Run refinement operations when Phase 1 critique fails or count is off.
+    Execute refinement based on critic recommendations.
 
-    Handles three types of operations from the critic:
-    1. follow_up_queries - Search for more literature
-    2. split_instructions - Split broad processes into narrower ones
-    3. merge_instructions - Merge narrow processes into broader ones
+    This function re-runs the research step with additional queries from
+    the critic. The actual refinement logic is handled by phase1_research
+    when it sees critic_recommendations in state.
+
+    Args:
+        state: Workflow state with phase1_critic_recommendations and config
+
+    Returns:
+        Updated biological_processes from re-running research
     """
-    eval_data = state.get("phase1_eval", {})
-    follow_up = eval_data.get("follow_up_queries", [])
-    split_instructions = eval_data.get("split_instructions", [])
-    merge_instructions = eval_data.get("merge_instructions", [])
+    # Increment iteration counter
     iteration = state.get("phase1_iteration", 0) + 1
 
-    hallmark = state.get("hallmark_name")
-    updates: dict[str, Any] = {"phase1_iteration": iteration}
-
-    processes = list(state.get("biological_processes", []))
-
-    # === HANDLE SPLITS ===
-    if split_instructions:
-        for instruction in split_instructions:
-            # Use LLM to execute the split
-            split_prompt = f"""Execute this split instruction on the biological processes list:
-
-Instruction: {instruction}
-
-Current processes:
-{json.dumps([p['process_name'] for p in processes], indent=2)}
-
-Return a JSON array showing how to split. Format:
-```json
-[
-  {{
-    "original": "DNA methylation changes",
-    "split_into": ["DNA hypermethylation", "DNA hypomethylation"]
-  }}
-]
-```
-"""
-
-            llm = get_llm()
-            response = llm.invoke(split_prompt)
-
-            try:
-                json_start = response.find("[")
-                json_end = response.rfind("]") + 1
-                if json_start >= 0 and json_end > json_start:
-                    json_str = response[json_start:json_end]
-                    split_plan = json.loads(json_str)
-
-                    # Execute the splits
-                    for split in split_plan:
-                        original = split.get("original")
-                        split_into = split.get("split_into", [])
-
-                        # Find the original process
-                        for i, proc in enumerate(processes):
-                            if proc["process_name"] == original:
-                                # Remove original, add split versions
-                                processes.pop(i)
-                                for new_name in split_into:
-                                    processes.append({
-                                        "rank": 0,
-                                        "process_name": new_name,
-                                        "evidence_score": proc["evidence_score"],  # Inherit score
-                                        "evidence_summary": f"Split from {original}. {proc.get('evidence_summary', '')}",
-                                        "sources": proc.get("sources", []),
-                                    })
-                                break
-            except json.JSONDecodeError:
-                pass  # Skip if split fails
-
-    # === HANDLE MERGES ===
-    if merge_instructions:
-        for instruction in merge_instructions:
-            # Use LLM to execute the merge
-            merge_prompt = f"""Execute this merge instruction on the biological processes list:
-
-Instruction: {instruction}
-
-Current processes:
-{json.dumps([p['process_name'] for p in processes], indent=2)}
-
-Return a JSON array showing how to merge. Format:
-```json
-[
-  {{
-    "merge": ["histone acetylation alterations", "histone methylation alterations"],
-    "into": "histone modification alterations",
-    "keep_highest_score": true
-  }}
-]
-```
-"""
-
-            llm = get_llm()
-            response = llm.invoke(merge_prompt)
-
-            try:
-                json_start = response.find("[")
-                json_end = response.rfind("]") + 1
-                if json_start >= 0 and json_end > json_start:
-                    json_str = response[json_start:json_end]
-                    merge_plan = json.loads(json_str)
-
-                    # Execute the merges
-                    for merge in merge_plan:
-                        to_merge = merge.get("merge", [])
-                        into_name = merge.get("into")
-                        keep_highest = merge.get("keep_highest_score", True)
-
-                        # Find the processes to merge
-                        to_remove = []
-                        merged_proc = None
-                        best_score = 0
-
-                        for proc_name in to_merge:
-                            for i, proc in enumerate(processes):
-                                if proc["process_name"] == proc_name:
-                                    if keep_highest and proc["evidence_score"] > best_score:
-                                        best_score = proc["evidence_score"]
-                                        merged_proc = proc.copy()
-                                    else:
-                                        to_remove.append(proc)
-                                    break
-
-                        if merged_proc and into_name:
-                            merged_proc["process_name"] = into_name
-                            # Remove merged processes
-                            for proc in to_remove:
-                                if proc in processes:
-                                    processes.remove(proc)
-                            # Add the merged process
-                            processes.append(merged_proc)
-            except json.JSONDecodeError:
-                pass  # Skip if merge fails
-
-    # === HANDLE FOLLOW-UP SEARCHES (existing behavior) ===
-    if follow_up:
-        new_processes = []
-
-        for query in follow_up[:3]:  # Limit to 3 follow-up queries
-            # Query vector DB
-            vector_results = query_vector_db(query=query, top_k=5)
-
-            # Query PubMed
-            pubmed_results = query_pubmed(query=f"{query}", retmax=3)
-
-            # Use LLM to extract any NEW processes from this evidence
-            existing_processes = {p["process_name"] for p in processes}
-
-            corpus_snippets = "\n\n".join([
-                rec.get('text', '')[:300] for rec in vector_results
-            ])
-
-            pubmed_snippets = "\n\n".join([
-                f"PMID:{rec.get('pmid')} - {rec.get('title', '')}"
-                for rec in pubmed_results
-            ])
-
-            extract_prompt = f"""Extract biological processes related to "{hallmark}" from the following evidence.
-
-Corpus:
-{corpus_snippets}
-
-PubMed:
-{pubmed_snippets}
-
-Already identified: {', '.join(existing_processes)}
-
-Return ONLY a JSON list of NEW processes not already identified:
-```json
-[
-  {{
-    "process_name": "name",
-    "evidence_score": 7,
-    "evidence_summary": "...",
-    "sources": ["PMID:xxx"]
-  }}
-]
-```
-"""
-
-            llm = get_llm()
-            response = llm.invoke(extract_prompt)
-
-            try:
-                json_start = response.find("[")
-                json_end = response.rfind("]") + 1
-                if json_start >= 0 and json_end > json_start:
-                    json_str = response[json_start:json_end]
-                    extracted = json.loads(json_str)
-                    new_processes.extend(extracted)
-            except json.JSONDecodeError:
-                pass  # Skip if extraction fails
-
-        if new_processes:
-            processes.extend(new_processes)
-
-    # Update the biological processes with all changes
-    updates["biological_processes"] = processes
-
-    return updates
+    # Re-run research with critic recommendations
+    result = phase1_research(state)
+    result["phase1_iteration"] = iteration
+    return result
 
 
 def phase1_finalize(state: dict[str, Any]) -> dict[str, Any]:
     """
     Finalize Phase 1 by sorting processes and creating BP queue.
+
+    Args:
+        state: Workflow state with biological_processes and config
+
+    Returns:
+        Dict with sorted biological_processes and bp_queue
     """
+    # Read config from state
+    cfg = state.get("config", {})
+    p1 = cfg.get("phase1", {})
+    max_processes = p1.get("max_processes", 15)
+
     processes = list(state.get("biological_processes", []))
 
     # Sort by evidence score desc, then by process name
@@ -454,14 +460,14 @@ def phase1_finalize(state: dict[str, Any]) -> dict[str, Any]:
         key=lambda p: (-p.get("evidence_score", 0), p.get("process_name", ""))
     )
 
-    # Trim to 10-15
-    processes = processes[:15]
+    # Trim to max
+    processes = processes[:max_processes]
 
     # Re-rank
     for idx, proc in enumerate(processes, start=1):
         proc["rank"] = idx
 
-    # Create queue
+    # Create queue for Phase 2
     bp_queue = [p["process_name"] for p in processes if p.get("process_name")]
 
     return {"biological_processes": processes, "bp_queue": bp_queue}

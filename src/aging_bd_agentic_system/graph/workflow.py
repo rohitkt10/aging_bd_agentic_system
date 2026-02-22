@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -26,19 +25,30 @@ from aging_bd_agentic_system.graph.state import ResearchState
 
 def phase1_route(state: dict[str, Any]) -> str:
     """Route Phase 1 critique results to refine or finalize."""
-    eval_data = state.get("phase1_eval", {})
+    recommendations = state.get("phase1_critic_recommendations", {})
     iteration = state.get("phase1_iteration", 0)
-    max_iterations = int(os.environ.get("PHASE1_MAX_ITERATIONS", "3"))
-    if eval_data.get("grade") == "fail" and iteration < max_iterations:
-        return "phase1_refine"
-    return "phase1_finalize"
+
+    # Read max_iterations from config
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase1", {}).get("max_iterations", 2)
+
+    grade = recommendations.get("grade", "fail")
+
+    # If critic passes or we've hit max iterations, finalize
+    if grade == "pass" or iteration >= max_iterations:
+        return "phase1_finalize"
+    return "phase1_refine"
 
 
 def phase2_route(state: dict[str, Any]) -> str:
     """Route Phase 2 critique results to refine or GO term mapping."""
     eval_data = state.get("phase2_eval", {})
     iteration = state.get("phase2_critic_iteration", 0)
-    max_iterations = int(os.environ.get("PHASE2_REFINE_MAX_ITERATIONS", "3"))
+
+    # Read max_refine_iterations from config
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase2", {}).get("max_refine_iterations", 3)
+
     if eval_data.get("grade") == "fail" and iteration < max_iterations:
         return "phase2_refine"
     return "map_go_terms"
@@ -47,7 +57,10 @@ def phase2_route(state: dict[str, Any]) -> str:
 def phase2_research_route(state: dict[str, Any]) -> str:
     """Route Phase 2 research results: continue loop or go to critic."""
     iteration = state.get("phase2_research_iteration", 0)
-    max_iterations = int(os.environ.get("PHASE2_RESEARCH_MAX_ITERATIONS", "7"))
+
+    # Read max_research_iterations from config
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase2", {}).get("max_research_iterations", 7)
 
     # If we haven't reached max iterations, continue research loop
     if iteration < max_iterations:

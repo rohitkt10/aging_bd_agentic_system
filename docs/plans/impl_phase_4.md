@@ -17,19 +17,16 @@
 
 ### Phase 2 Routing Logic (ReAct Loop)
 
-**The Phase 2 subgraph needs a routing function to handle the autonomous ReAct research loop:**
+**The Phase 2 subgraph uses routing functions that read from `state["config"]`:**
 
 ```python
 def phase2_research_route(state: dict[str, Any]) -> str:
     """
     Route within the Phase 2 research loop.
-
-    Routes back to phase2_research until max iterations reached,
-    then routes to phase2_critic for quality review.
+    Reads max_iterations from state["config"]["phase2"].
     """
-    import os
-
-    max_iterations = int(os.environ.get("PHASE2_RESEARCH_MAX_ITERATIONS", "7"))
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase2", {}).get("max_research_iterations", 7)
     current_iteration = state.get("phase2_research_iteration", 0)
 
     if current_iteration < max_iterations:
@@ -38,21 +35,20 @@ def phase2_research_route(state: dict[str, Any]) -> str:
         return "phase2_critic"  # Research complete, review quality
 
 
-def phase2_critique_route(state: dict[str, Any]) -> str:
+def phase2_route(state: dict[str, Any]) -> str:
     """
     Route after critique determines if refinement is needed.
+    Reads max_refine_iterations from state["config"]["phase2"].
     """
-    import os
+    cfg = state.get("config", {})
+    max_refine = cfg.get("phase2", {}).get("max_refine_iterations", 3)
 
     eval_data = state.get("phase2_eval", {})
-    grade = eval_data.get("grade", "fail")
-    iteration = state.get("phase2_iteration", 0)
-    max_refine = int(os.environ.get("PHASE2_REFINE_MAX_ITERATIONS", "3"))
+    iteration = state.get("phase2_critic_iteration", 0)
 
-    if grade == "fail" and iteration < max_refine:
-        return "phase2_refine"  # Try to fix issues
-    else:
-        return "map_go_terms"  # Good enough, proceed
+    if eval_data.get("grade") == "fail" and iteration < max_refine:
+        return "phase2_refine"
+    return "map_go_terms"
 ```
 
 ---
@@ -86,10 +82,11 @@ def phase2_critique_route(state: dict[str, Any]) -> str:
 
 ## 4.2 Verify State Schema
 
-**File to verify:** `src/aging_bd_agentic_system/graph/state.py`
+**File:** `src/aging_bd_agentic_system/graph/state.py`
 
 **Required fields:**
 - `hallmark_name: str`
+- `config: Dict[str, Any]` — Configuration traveling through workflow
 - `tool_call_history: Annotated[list[dict], operator.add]`
 - `reasoning_trace: Annotated[list[str], operator.add]`
 - `warnings: Annotated[list[str], operator.add]`
@@ -97,21 +94,19 @@ def phase2_critique_route(state: dict[str, Any]) -> str:
 - `context_summary: str | None`
 - `token_count: int`
 - `research_scratchpad: str`
-- `phase1_plan: list[str]`
+- `phase1_plan: Dict[str, Any]` — Contains research_goals with search terms
 - `phase1_iteration: int`
-- `phase1_eval: dict[str, Any]`
-- `biological_processes: list[dict[str, Any]]`
-- `bp_queue: list[str]`
+- `phase1_critique: Optional[str]` — Unstructured critique text
+- `phase1_critic_recommendations: Optional[Dict[str, Any]]` — Structured recommendations
+- `biological_processes: List[Dict[str, Any]]`
+- `bp_queue: List[str]`
 - `current_bp_index: int`
 - `current_bp_name: str`
-- `phase2_iteration: int` (for refine loop)
+- `phase2_critic_iteration: int` (for refine loop)
 - `phase2_research_iteration: int` (for ReAct research loop)
-- `phase2_eval: dict[str, Any]`
-- `genes_found: Annotated[list[dict[str, Any]], operator.add]`
-- `go_terms_found: Annotated[list[dict[str, Any]], operator.add]`
-
-**If Copilot's version matches:** Keep it
-**If fields are missing:** Add them
+- `phase2_eval: Dict[str, Any]`
+- `genes_found: Annotated[List[Dict[str, Any]], operator.add]`
+- `go_terms_found: Annotated[List[Dict[str, Any]], operator.add]`
 
 ---
 
@@ -323,13 +318,15 @@ VERTEX_PROJECT_ID=your-project-id
 
 ## Phase 4 Completion Checklist
 
-- [ ] Workflow graph verified (all nodes present)
-- [ ] State schema verified (all fields present)
-- [ ] End-to-end test completes without crashing
-- [ ] Output files generated (3 TSV files)
-- [ ] Trace file generated with LLM and node events
-- [ ] Validation runs (issues logged but not fatal)
-- [ ] Outputs are reasonable quality (human review)
+- [x] Workflow graph verified (all nodes present)
+- [x] State schema verified (all fields present including `config`)
+- [x] Configuration travels through `state["config"]`
+- [x] End-to-end test completes without crashing
+- [x] Output files generated (3 TSV files)
+- [x] Trace file generated with LLM and node events
+- [x] Validation runs (issues logged but not fatal)
+- [x] Outputs written to `outputs/{hallmark}/`
+- [x] Full state written to `outputs/{hallmark}/full_state.json`
 
 ---
 
@@ -343,50 +340,17 @@ python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
 
 # Check outputs
 echo "=== Process Count ==="
-wc -l outputs/epigenetic_alterations/processes.tsv
+wc -l outputs/epigenetic_alterations/biological_processes.tsv
 
 echo "=== Gene Count ==="
-wc -l outputs/epigenetic_alterations/genes.tsv
+wc -l outputs/epigenetic_alterations/curated_genes.tsv
 
 echo "=== GO Term Count ==="
-wc -l outputs/epigenetic_alterations/go_terms.tsv
+wc -l outputs/epigenetic_alterations/curated_go_terms.tsv
 
-# Check trace
-echo "=== Trace Summary ==="
-python -c "
-from aging_bd_agentic_system.utils.tracing import get_trace_files, summarize_trace
-import sys
-
-traces = get_trace_files('epigenetic_alterations')
-if traces:
-    summary = summarize_trace(traces[-1])
-    for k, v in summary.items():
-        print(f'{k}: {v}')
-else:
-    print('No trace files found')
-    sys.exit(1)
-"
-```
-
-**Expected output:**
-```
-=== Process Count ===
-16 outputs/epigenetic_alterations/processes.tsv  (15 + header)
-
-=== Gene Count ===
-350 outputs/epigenetic_alterations/genes.tsv  (within 300-500 range)
-
-=== GO Term Count ===
-65 outputs/epigenetic_alterations/go_terms.tsv  (within 50-80 range)
-
-=== Trace Summary ===
-trace_file: logs/traces/epigenetic_alterations_20250219_143022.jsonl
-total_events: 250
-llm_calls: 45
-tool_calls: 0
-errors: 0
-start_time: 2025-02-19T14:30:22
-end_time: 2025-02-19T15:15:48
+# Check logs
+echo "=== Log Files ==="
+ls -la logs/epigenetic_alterations/
 ```
 
 ---
@@ -394,9 +358,10 @@ end_time: 2025-02-19T15:15:48
 ## What If Something Doesn't Work?
 
 **Strategy:**
-1. Check trace file for error events
-2. Add print statements to isolate the issue
-3. Test components individually:
+1. Check trace file for error events: `logs/{hallmark}/trace_*.jsonl`
+2. Check audit log: `logs/{hallmark}/audit.jsonl`
+3. Check full state: `outputs/{hallmark}/full_state.json`
+4. Test components individually:
    - LLM integration: `python scripts/test_llm.py`
    - Tools: Import and call directly
    - Single agent node: Call the function directly

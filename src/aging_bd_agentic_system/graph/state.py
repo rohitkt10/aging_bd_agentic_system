@@ -16,6 +16,9 @@ class ResearchState(TypedDict):
     # Input
     hallmark_name: str
 
+    # Configuration (travels through entire workflow)
+    config: Dict[str, Any]
+
     # Audit
     tool_call_history: Annotated[List[Dict[str, Any]], operator.add]
     reasoning_trace: Annotated[List[str], operator.add]
@@ -28,9 +31,12 @@ class ResearchState(TypedDict):
     research_scratchpad: str
 
     # Phase 1 outputs
-    phase1_plan: List[str]
+    phase1_plan: Dict[str, Any]  # Contains research_goals with search terms
     phase1_iteration: int
-    phase1_eval: Dict[str, Any]
+    phase1_critique: Optional[str]  # Unstructured critique text
+    # Structured recommendations from critic
+    phase1_critic_recommendations: Optional[Dict[str, Any]]
+    phase1_eval: Optional[Dict[str, Any]]  # Legacy, kept for compatibility
     biological_processes: List[Dict[str, Any]]
     bp_queue: List[str]
 

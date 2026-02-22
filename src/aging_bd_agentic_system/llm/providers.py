@@ -29,7 +29,9 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    def invoke_structured(self, prompt: str, schema: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    def invoke_structured(
+        self, prompt: str, schema: dict[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
         """
         Invoke the LLM with structured output expectations.
 
@@ -76,11 +78,7 @@ class VertexGeminiProvider(LLMProvider):
         )
 
     def invoke(
-        self,
-        prompt: str,
-        *,
-        system_prompt: str | None = None,
-        **kwargs: Any
+        self, prompt: str, *, system_prompt: str | None = None, **kwargs: Any
     ) -> str:
         """
         Invoke LLM with text prompt, return response text.
@@ -95,7 +93,7 @@ class VertexGeminiProvider(LLMProvider):
         if system_prompt:
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt)
+                HumanMessage(content=prompt),
             ]
         else:
             messages = [HumanMessage(content=prompt)]
@@ -109,7 +107,7 @@ class VertexGeminiProvider(LLMProvider):
         schema: dict[str, Any],
         *,
         system_prompt: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """
         Invoke LLM with structured output schema.
@@ -131,7 +129,7 @@ class VertexGeminiProvider(LLMProvider):
         if system_prompt:
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt)
+                HumanMessage(content=prompt),
             ]
         else:
             messages = [HumanMessage(content=prompt)]
@@ -172,11 +170,7 @@ class OpenAIProvider(LLMProvider):
         )
 
     def invoke(
-        self,
-        prompt: str,
-        *,
-        system_prompt: str | None = None,
-        **kwargs: Any
+        self, prompt: str, *, system_prompt: str | None = None, **kwargs: Any
     ) -> str:
         """
         Invoke LLM with text prompt, return response text.
@@ -191,7 +185,7 @@ class OpenAIProvider(LLMProvider):
         if system_prompt:
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt)
+                HumanMessage(content=prompt),
             ]
         else:
             messages = [HumanMessage(content=prompt)]
@@ -205,7 +199,7 @@ class OpenAIProvider(LLMProvider):
         schema: dict[str, Any],
         *,
         system_prompt: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """
         Invoke LLM with structured output schema.
@@ -227,7 +221,7 @@ class OpenAIProvider(LLMProvider):
         if system_prompt:
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt)
+                HumanMessage(content=prompt),
             ]
         else:
             messages = [HumanMessage(content=prompt)]

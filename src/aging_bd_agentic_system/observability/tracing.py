@@ -31,7 +31,9 @@ class TracingCallbackHandler(BaseCallbackHandler):
     - Tool calls
     """
 
-    def __init__(self, log_dir: Path | None = None, *, hallmark_name: str | None = None):
+    def __init__(
+        self, log_dir: Path | None = None, *, hallmark_name: str | None = None
+    ):
         """
         Initialize tracing handler.
 
@@ -45,7 +47,9 @@ class TracingCallbackHandler(BaseCallbackHandler):
         # If hallmark_name provided, use logs/{hallmark}/, else use provided log_dir or default
         if hallmark_name:
             # Sanitize hallmark name for use in directory path
-            safe_name = hallmark_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+            safe_name = (
+                hallmark_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+            )
             self.log_dir = Path("logs") / safe_name
         else:
             self.log_dir = log_dir or config.DATA_DIR / "logs"
@@ -71,7 +75,9 @@ class TracingCallbackHandler(BaseCallbackHandler):
     ) -> None:
         """Called when a chain (graph) starts execution."""
         logger.info(f"Chain started: {run_id}")
-        self._log_event("chain_start", {"run_id": str(run_id), "inputs": self._sanitize(inputs)})
+        self._log_event(
+            "chain_start", {"run_id": str(run_id), "inputs": self._sanitize(inputs)}
+        )
 
     def on_chain_end(
         self,
@@ -82,7 +88,9 @@ class TracingCallbackHandler(BaseCallbackHandler):
     ) -> None:
         """Called when a chain (graph) ends execution."""
         logger.info(f"Chain ended: {run_id}")
-        self._log_event("chain_end", {"run_id": str(run_id), "outputs": self._sanitize(outputs)})
+        self._log_event(
+            "chain_end", {"run_id": str(run_id), "outputs": self._sanitize(outputs)}
+        )
 
         # Write trace file
         self._write_trace_file()
@@ -281,9 +289,7 @@ def setup_logging(level: int = logging.INFO) -> None:
 
 
 def create_tracing_callback(
-    log_dir: Path | None = None,
-    *,
-    hallmark_name: str | None = None
+    log_dir: Path | None = None, *, hallmark_name: str | None = None
 ) -> TracingCallbackHandler:
     """
     Create a tracing callback handler.

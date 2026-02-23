@@ -9,7 +9,7 @@ api_key = "sk-proj-UVzjOAPkIwVAe2LRqnBrKH6LaOpyoQFC"+\
     "_s3HGUvcenj2VJbQA"
 llm = ChatOpenAI(
     api_key=api_key, 
-    model="gpt-5.2",
+    model="gpt-5-nano",
     max_tokens=8000,
     temperature=0.6,
     )

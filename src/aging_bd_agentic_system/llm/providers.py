@@ -211,7 +211,7 @@ class OpenAIProvider(LLMProvider):
             **kwargs: Additional provider-specific parameters
 
         Note: Uses LangChain's with_structured_output() which works with
-        models that support tool/function calling (GPT-4, GPT-3.5-turbo do).
+        models that support tool/function calling.
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 

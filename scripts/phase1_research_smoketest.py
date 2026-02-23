@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-
+from pdb import set_trace
 from dotenv import load_dotenv
 
 # Load .env from project root
@@ -25,7 +25,7 @@ from aging_bd_agentic_system.graph.workflow import build_phase1_graph
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Phase 1 smoke test")
-    parser.add_argument("--hallmark", required=True, help="Aging hallmark")
+    parser.add_argument("--hallmark", help="Aging hallmark", default="genomic instability")
     return parser.parse_args()
 
 
@@ -58,8 +58,13 @@ def main() -> int:
 
     # Run Phase 1 graph
     graph = build_phase1_graph()
+
+    set_trace()
+    
     print("\nRunning Phase 1...")
     result = graph.invoke(initial_state)
+
+    set_trace()
 
     # Summary
     processes = result.get("biological_processes", [])

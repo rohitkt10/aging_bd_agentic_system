@@ -29,7 +29,7 @@ class LLMClient:
         Initialize LLM client from environment variables.
 
         Args:
-            provider: Override provider ("vertex" or "openai"). If None, uses LLM_PROVIDER env var.
+            provider: Override provider ("vertexai" or "openai"). If None, uses LLM_PROVIDER env var.
 
         Raises:
             ValueError: If required environment variables are not set.
@@ -38,11 +38,11 @@ class LLMClient:
 
         if provider == "openai":
             self.provider = self._init_openai()
-        elif provider == "vertex":
+        elif provider == "vertexai":
             self.provider = self._init_vertex()
         else:
             raise ValueError(
-                f"Unknown LLM_PROVIDER: {provider}. Must be 'vertex' or 'openai'."
+                f"Unknown LLM_PROVIDER: {provider}. Must be 'vertexai' or 'openai'."
             )
 
     def _init_vertex(self) -> LLMProvider:

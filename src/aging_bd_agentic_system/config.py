@@ -28,6 +28,7 @@ class Phase1Config:
     pubmed_retmax: int = 10
     max_iterations: int = 2
     max_processes: int = 15
+    summary_max_words: int = 300
 
 
 @dataclass
@@ -40,6 +41,20 @@ class Phase2Config:
     opengenes_seed_max_results: int = 50
     pubmed_max_results: int = 5
     vector_db_max_results: int = 5
+
+
+@dataclass
+class LLMConfig:
+    """Configuration for LLM client."""
+
+    provider: str = "vertex"  # "vertex" or "openai"
+    model: str = "gemini-2.5-pro"  # Model name (provider-specific)
+    temperature: float = 0.7
+    max_tokens: int | None = None
+    # Vertex-specific
+    vertex_location: str = "us-central1"
+    # OpenAI-specific
+    openai_base_url: str | None = None
 
 
 @dataclass
@@ -63,6 +78,7 @@ class RunConfig:
     hallmark: str = ""
     output_dir: Path = field(default_factory=lambda: Path("outputs"))
     use_llm_summarization: bool = True
+    llm: LLMConfig = field(default_factory=LLMConfig)
     phase1: Phase1Config = field(default_factory=Phase1Config)
     phase2: Phase2Config = field(default_factory=Phase2Config)
 
@@ -72,6 +88,7 @@ class RunConfig:
             "hallmark": self.hallmark,
             "output_dir": str(self.output_dir),
             "use_llm_summarization": self.use_llm_summarization,
+            "llm": asdict(self.llm),
             "phase1": asdict(self.phase1),
             "phase2": asdict(self.phase2),
         }
@@ -92,6 +109,12 @@ class RunConfig:
             config.output_dir = Path(data["output_dir"])
         if "use_llm_summarization" in data:
             config.use_llm_summarization = data["use_llm_summarization"]
+
+        # Merge llm
+        if "llm" in data:
+            for key, value in data["llm"].items():
+                if hasattr(config.llm, key):
+                    setattr(config.llm, key, value)
 
         # Merge phase1
         if "phase1" in data:

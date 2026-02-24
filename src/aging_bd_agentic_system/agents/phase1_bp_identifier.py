@@ -16,13 +16,16 @@ from __future__ import annotations
 
 import json
 from typing import Any
-
+from pdb import set_trace
 from aging_bd_agentic_system.literature_pipeline import config
 from aging_bd_agentic_system.llm import get_llm
 from aging_bd_agentic_system.llm.prompts import (
+    PHASE1_CORPUS_SUMMARY_PROMPT,
     PHASE1_CRITIC_STRUCTURED_PROMPT,
     PHASE1_CRITIC_UNSTRUCTURED_PROMPT,
+    PHASE1_PUBMED_SUMMARY_PROMPT,
     PHASE1_PLAN_SYSTEM_PROMPT,
+    PHASE1_SUMMARY_SYSTEM_PROMPT,
     PHASE1_SYSTEM_PROMPT,
 )
 from aging_bd_agentic_system.tools import query_pubmed, query_vector_db
@@ -98,6 +101,16 @@ CRITIC_STRUCTURED_SCHEMA = {
     "required": ["grade", "vector_db_queries", "pubmed_queries", "focus_areas"],
 }
 
+GOAL_SUMMARY_SCHEMA = {
+    "title": "goal_summary",
+    "type": "object",
+    "properties": {
+        "goal": {"type": "string"},
+        "summary": {"type": "string"},
+    },
+    "required": ["goal", "summary"],
+}
+
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -158,6 +171,72 @@ def _deduplicate_processes(processes: list[dict]) -> list[dict]:
     return unique
 
 
+def _summarize_goal_results(
+    goal: str,
+    hallmark_name: str,
+    corpus_results: list[dict],
+    pubmed_results: list[dict],
+    max_words: int = 300,
+) -> dict[str, str]:
+    """
+    Summarize corpus and PubMed results for a single research goal.
+
+    Makes two separate LLM calls (one for corpus, one for PubMed) for reliability.
+
+    Args:
+        goal: The research goal being summarized
+        hallmark_name: The aging hallmark being researched
+        corpus_results: List of corpus search results
+        pubmed_results: List of PubMed search results
+        max_words: Approximate max words per summary section (default 300)
+
+    Returns:
+        Dict with goal, corpus_summary, and pubmed_summary
+    """
+    llm = get_llm()
+
+    # Format raw results
+    corpus_text = _format_corpus_results(corpus_results) if corpus_results else "No results"
+    pubmed_text = _format_pubmed_results(pubmed_results) if pubmed_results else "No results"
+
+    # Summarize corpus results
+    corpus_prompt = PHASE1_CORPUS_SUMMARY_PROMPT.format(
+        system_prompt=PHASE1_SUMMARY_SYSTEM_PROMPT,
+        goal=goal,
+        hallmark_name=hallmark_name,
+        results=corpus_text,
+        max_words=max_words,
+    )
+    try:
+        corpus_result = llm.invoke_structured(corpus_prompt, schema=GOAL_SUMMARY_SCHEMA)
+    except Exception as e:
+        print(f"Corpus structured output failed ({e}), falling back to JSON parsing")
+        response = llm.invoke(corpus_prompt)
+        corpus_result = _extract_json_from_response(response)
+
+    # Summarize PubMed results
+    pubmed_prompt = PHASE1_PUBMED_SUMMARY_PROMPT.format(
+        system_prompt=PHASE1_SUMMARY_SYSTEM_PROMPT,
+        goal=goal,
+        hallmark_name=hallmark_name,
+        results=pubmed_text,
+        max_words=max_words,
+    )
+    try:
+        pubmed_result = llm.invoke_structured(pubmed_prompt, schema=GOAL_SUMMARY_SCHEMA)
+    except Exception as e:
+        print(f"PubMed structured output failed ({e}), falling back to JSON parsing")
+        response = llm.invoke(pubmed_prompt)
+        pubmed_result = _extract_json_from_response(response)
+
+    # Combine results into expected format
+    return {
+        "goal": goal,
+        "corpus_summary": corpus_result.get("summary", ""),
+        "pubmed_summary": pubmed_result.get("summary", ""),
+    }
+    
+
 # =============================================================================
 # MAIN FUNCTIONS
 # =============================================================================
@@ -210,13 +289,15 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
 
     user_prompt = f"""## Reference Context
 
-### Lopez-Otin Hallmarks Paper
-{lopez_context}
+                    ### Lopez-Otin Hallmarks Paper
+                    {lopez_context}
 
-Generate a research plan for identifying biological processes related to "{hallmark}".
-"""
+                    Generate a research plan for identifying biological 
+                    processes related to "{hallmark}".
+                    """
 
     llm = get_llm()
+    
 
     try:
         plan = llm.invoke_structured(
@@ -236,7 +317,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     Execute the research plan and identify biological processes.
 
     Consumes the plan from phase1_plan and executes searches using the
-    suggested search terms. Produces a liberal list of BPs (duplicates removed).
+    suggested search terms. Each goal's results are summarized before
+    being aggregated for the identification LLM.
 
     Args:
         state: Workflow state with phase1_plan and config
@@ -255,73 +337,111 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     vector_db_top_k = p1.get("vector_db_top_k", 20)
     pubmed_retmax = p1.get("pubmed_retmax", 10)
     max_iterations = p1.get("max_iterations", 2)
+    summary_max_words = p1.get("summary_max_words", 300)
 
     # Track iteration
     current_iteration = state.get("phase1_iteration", 0) + 1
 
-    # Gather evidence from multiple sources
-    all_corpus_results = []
-    all_pubmed_results = []
-
-    # 1. Execute searches from the plan (initial or refined)
+    # 1. Execute searches per goal and summarize each goal's results
     research_goals = plan.get("research_goals", [])
+    goal_summaries = []
 
     for goal in research_goals:
-        # Vector DB searches
+        goal_text = goal.get("goal", "")
+        goal_corpus_results = []
+        goal_pubmed_results = []
+
+        # Vector DB searches for this goal
         for term in goal.get("vector_db_terms", []):
             results = query_vector_db(query=term, top_k=vector_db_top_k)
-            all_corpus_results.extend(results)
+            goal_corpus_results.extend(results)
 
-        # PubMed searches
+        # PubMed searches for this goal
         for term in goal.get("pubmed_terms", []):
             results = query_pubmed(query=term, retmax=pubmed_retmax)
-            all_pubmed_results.extend(results)
+            goal_pubmed_results.extend(results)
+        
+        # Summarize this goal's results
+        if goal_corpus_results or goal_pubmed_results:
+            summary = _summarize_goal_results(
+                goal=goal_text,
+                hallmark_name=hallmark,
+                corpus_results=goal_corpus_results,
+                pubmed_results=goal_pubmed_results,
+                max_words=summary_max_words,
+            )
+            goal_summaries.append(summary)
 
     # 2. Execute additional searches from critic recommendations (if refining)
+    critic_corpus_results = []
+    critic_pubmed_results = []
     if critic_recommendations:
         for query in critic_recommendations.get("vector_db_queries", []):
             results = query_vector_db(query=query, top_k=vector_db_top_k)
-            all_corpus_results.extend(results)
+            critic_corpus_results.extend(results)
 
         for query in critic_recommendations.get("pubmed_queries", []):
             results = query_pubmed(query=query, retmax=pubmed_retmax)
-            all_pubmed_results.extend(results)
+            critic_pubmed_results.extend(results)
 
-    # 3. Build context for LLM
-    corpus_section = _format_corpus_results(all_corpus_results)
-    pubmed_section = _format_pubmed_results(all_pubmed_results)
+    # 3. Build summarized context for LLM
+    summaries_section = ""
+    for i, summary in enumerate(goal_summaries):
+        summaries_section += f"""
+                            ### Goal {i+1}: {summary.get('goal', 'Unknown')}
+                            **Corpus Summary:**
+                            {summary.get('corpus_summary', 'No results')}
+
+                            **PubMed Summary:**
+                            {summary.get('pubmed_summary', 'No results')}
+
+                            ---
+                            """
+
+    # Add critic recommendation results if present
+    critic_section = ""
+    if critic_corpus_results or critic_pubmed_results:
+        critic_corpus_text = _format_corpus_results(critic_corpus_results)
+        critic_pubmed_text = _format_pubmed_results(critic_pubmed_results)
+        critic_section = f"""
+                            ### Additional Results from Critique Recommendations
+                            **Corpus:**
+                            {critic_corpus_text}
+
+                            **PubMed:**
+                            {critic_pubmed_text}
+                            """
 
     # Include iteration context in prompt
     iteration_context = ""
     if current_iteration > 1:
         iteration_context = f"""
-## Iteration Context
-This is iteration {current_iteration} of {max_iterations}.
-Focus on: {', '.join(critic_recommendations.get('focus_areas', []))}
-"""
-        if current_iteration == max_iterations:
-            iteration_context += (
-                "\nThis is the FINAL iteration. Produce the final list now."
-            )
+                            ## Iteration Context
+                            This is iteration {current_iteration} of {max_iterations}.
+                            Focus on: {', '.join(critic_recommendations.get('focus_areas', []))}
+                            """
+
+    if current_iteration == max_iterations:
+        iteration_context += (
+            "\nThis is the FINAL iteration. Produce the final list now."
+        )
 
     user_context = f"""## Reference Context
 
-### Lopez-Otin Hallmarks Paper
-{lopez_context}
+                    ### Lopez-Otin Hallmarks Paper
+                    {lopez_context}
 
-### Relevant Literature from Corpus
-{corpus_section}
-
-### PubMed Search Results
-{pubmed_section}
-{iteration_context}
-Identify biological processes related to {hallmark} based on this evidence.
-"""
+                    ## Summarized Research Findings by Goal
+                    {summaries_section}
+                    {critic_section}
+                    {iteration_context}
+                    Identify biological processes related to {hallmark} based on this evidence.
+                    """
 
     # 4. Call LLM to identify processes
     system_prompt = PHASE1_SYSTEM_PROMPT.format(hallmark_name=hallmark)
     llm = get_llm()
-
+    set_trace()
     try:
         processes = llm.invoke_structured(
             user_context,

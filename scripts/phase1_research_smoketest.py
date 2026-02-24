@@ -5,7 +5,7 @@ Smoke test for Phase 1 biological process identification.
 Usage:
     python scripts/phase1_research_smoketest.py --hallmark "epigenetic alterations"
 
-Requires VERTEX_PROJECT_ID (or OPENAI_API_KEY with LLM_PROVIDER=openai) in .env
+Requires OPENAI_API_KEY in .env
 """
 
 from __future__ import annotations
@@ -19,8 +19,9 @@ from dotenv import load_dotenv
 # Load .env from project root
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from aging_bd_agentic_system.config import Phase1Config, RunConfig
+from aging_bd_agentic_system.config import LLMConfig, Phase1Config, RunConfig
 from aging_bd_agentic_system.graph.workflow import build_phase1_graph
+from aging_bd_agentic_system.llm import init_llm, get_llm
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,18 +33,30 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
+    # Configure LLM for OpenAI
+    llm_config = LLMConfig(
+                provider="openai",
+                model="gpt-5-nano",
+                temperature=0.7,
+    )
+
     # Explicitly configure for smoke test
     config = RunConfig(
         hallmark=args.hallmark,
+        llm=llm_config,
         phase1=Phase1Config(
             min_research_goals=2,
             max_research_goals=3,
-            vector_db_top_k=10,
+            vector_db_top_k=5,
             pubmed_retmax=5,
             max_iterations=1,
             max_processes=10,
         ),
     )
+
+    # Initialize LLM with config
+    init_llm(config.llm)
+    client = get_llm()
 
     print(f"\n{'='*50}")
     print(f"Phase 1 Smoke Test: {args.hallmark}")
@@ -58,8 +71,6 @@ def main() -> int:
 
     # Run Phase 1 graph
     graph = build_phase1_graph()
-
-    set_trace()
     
     print("\nRunning Phase 1...")
     result = graph.invoke(initial_state)

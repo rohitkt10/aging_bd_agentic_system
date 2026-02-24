@@ -69,14 +69,18 @@ class TestLLMClientIntegration:
         with pytest.raises(ValueError, match="VERTEX_PROJECT_ID"):
             LLMClient()
 
-    def test_client_uses_env_vars(self) -> None:
-        """Test that client reads configuration from environment."""
-        os.environ["VERTEX_PROJECT_ID"] = "test-project"
-        os.environ["VERTEX_LOCATION"] = "test-location"
-        os.environ["VERTEX_MODEL"] = "test-model"
-        os.environ["LLM_TEMPERATURE"] = "0.5"
+    def test_client_uses_config(self) -> None:
+        """Test that client reads configuration from LLMConfig."""
+        from aging_bd_agentic_system.config import LLMConfig
 
-        client = LLMClient()
+        os.environ["VERTEX_PROJECT_ID"] = "test-project"
+
+        config = LLMConfig(
+            model="test-model",
+            temperature=0.5,
+            vertex_location="test-location",
+        )
+        client = LLMClient(config)
         assert client.provider.llm.project == "test-project"
         assert client.provider.llm.location == "test-location"
         assert client.provider.llm.model_name == "test-model"

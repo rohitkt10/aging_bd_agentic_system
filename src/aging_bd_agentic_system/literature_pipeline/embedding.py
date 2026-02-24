@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from transformers.utils import logging as hf_logging
+import logging
+hf_logging.set_verbosity_error()
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
 
 
 def embed_texts(

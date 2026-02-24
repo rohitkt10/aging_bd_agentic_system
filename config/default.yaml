@@ -1,6 +1,43 @@
 # Aging BD Agentic System - Default Configuration
 # Copy this file and modify as needed.
 
+# =============================================================================
+# Top-Level Settings
+# =============================================================================
+
+# Output directory for generated files
+output_dir: outputs
+
+# Use LLM summarization for research results (reduces context size)
+use_llm_summarization: true
+
+# =============================================================================
+# LLM Configuration
+# =============================================================================
+
+llm:
+  # Provider: "vertex" or "openai"
+  provider: vertex
+
+  # Model name (provider-specific)
+  # Vertex: gemini-2.5-pro, gemini-2.0-flash, gemini-1.5-pro
+  # OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo
+  model: gemini-2.5-pro
+
+  # Generation parameters
+  temperature: 0.7
+  max_tokens: null  # null = no limit
+
+  # Vertex AI specific
+  vertex_location: us-central1
+
+  # OpenAI specific
+  openai_base_url: null  # For proxies/Azure
+
+# =============================================================================
+# Phase 1: Biological Process Identification
+# =============================================================================
+
 phase1:
   # Research plan generation
   min_research_goals: 4
@@ -16,6 +53,13 @@ phase1:
   # Final output
   max_processes: 15
 
+  # Summarization (when use_llm_summarization=true)
+  summary_max_words: 300
+
+# =============================================================================
+# Phase 2: Gene Research
+# =============================================================================
+
 phase2:
   # Research iterations per biological process
   max_research_iterations: 7
@@ -30,3 +74,14 @@ phase2:
   # Search parameters
   pubmed_max_results: 5
   vector_db_max_results: 5
+
+# =============================================================================
+# Literature Pipeline (Reference Only - corpus is frozen)
+# =============================================================================
+# These settings are for corpus re-indexing. Not used during normal runs.
+# See src/aging_bd_agentic_system/config.py:LiteraturePipelineConfig
+#
+# literature_pipeline:
+#   embedding_model_id: BAAI/bge-base-en-v1.5
+#   chunk_size_words: 300
+#   chunk_overlap_words: 50

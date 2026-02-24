@@ -16,6 +16,7 @@ from typing import Any
 
 from aging_bd_agentic_system.config import RunConfig
 from aging_bd_agentic_system.graph.workflow import build_workflow
+from aging_bd_agentic_system.llm import init_llm
 from aging_bd_agentic_system.observability.tracing import create_tracing_callback
 from aging_bd_agentic_system.utils.aggregation import aggregate_outputs
 from aging_bd_agentic_system.utils.audit_logger import log_event
@@ -26,7 +27,6 @@ from aging_bd_agentic_system.utils.output_writer import (
     write_processes_tsv,
 )
 from aging_bd_agentic_system.utils.validation import validate_all
-
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
@@ -118,6 +118,9 @@ def main() -> None:
         max_research_iterations=args.max_research_iterations,
         max_refine_iterations=args.max_refine_iterations,
     )
+
+    # Initialize LLM client with config
+    init_llm(config.llm)
 
     # Create tracing callback for observability
     tracing_handler = create_tracing_callback(hallmark_name=config.hallmark)

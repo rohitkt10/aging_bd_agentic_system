@@ -4,13 +4,62 @@ import json
 from pathlib import Path
 from typing import Any
 
+import torch 
+
 import faiss
 import numpy as np
 from pydantic import BaseModel, Field
 
 from aging_bd_agentic_system.literature_pipeline import config
 from aging_bd_agentic_system.literature_pipeline.embedding import embed_texts
+from aging_bd_agentic_system.literature_pipeline.config import EMBEDDING_MODEL_ID
 
+from sentence_transformers import SentenceTransformer
+from transformers.utils import logging as hf_logging
+import logging
+hf_logging.set_verbosity_error()
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
+
+
+_global_emb_model  = None
+def init_embedding_model():
+    global _global_emb_model
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = SentenceTransformer(EMBEDDING_MODEL_ID, device=device)
+
+    _global_emb_model = model
+    return _global_emb_model
+
+def get_embedding_model():
+    global _global_emb_model
+    if _global_emb_model is None:
+        init_embedding_model()
+    return _global_emb_model
+
+def embed_texts(
+    texts: list[str],
+    batch_size: int,
+    device: str,
+    normalize: bool = True,
+) -> np.ndarray:
+    """
+    Generate embeddings for a list of texts using SentenceTransformers.
+    """
+    if not texts:
+        raise ValueError("The 'texts' list is empty. Cannot generate embeddings.")
+
+    model = get_embedding_model()
+
+    embeddings = model.encode(
+        texts,
+        batch_size=batch_size,
+        show_progress_bar=True,
+        normalize_embeddings=normalize,
+        convert_to_numpy=True,
+    )
+
+    return embeddings.astype(np.float32)
 
 def _load_lookup(lookup_path: Path) -> dict[int, dict[str, Any]]:
     """Load lookup.jsonl records keyed by row_id."""
@@ -109,7 +158,6 @@ def query_vector_db(
 
     embeddings = embed_texts(
         [query],
-        model_id=model_id,
         batch_size=1,
         device=device,
         normalize=True,

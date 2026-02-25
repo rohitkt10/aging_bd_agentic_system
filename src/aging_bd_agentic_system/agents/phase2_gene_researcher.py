@@ -10,7 +10,7 @@ import json
 from typing import Any
 
 from aging_bd_agentic_system.llm import get_llm
-from aging_bd_agentic_system.llm.prompts import (
+from aging_bd_agentic_system.prompts.phase2_prompts import (
     PHASE2_CRITIQUE_SYSTEM_PROMPT,
     PHASE2_DECISION_USER_PROMPT,
     PHASE2_GO_MAPPING_SYSTEM_PROMPT,

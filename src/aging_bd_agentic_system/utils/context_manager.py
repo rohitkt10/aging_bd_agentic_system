@@ -13,7 +13,7 @@ import os
 from typing import Any
 
 from aging_bd_agentic_system.llm import get_llm
-from aging_bd_agentic_system.llm.prompts import (
+from aging_bd_agentic_system.prompts.phase2_prompts import (
     PHASE2_ACTIONABILITY_SUMMARY_PROMPT,
     PHASE2_SCORING_SUMMARY_PROMPT,
 )

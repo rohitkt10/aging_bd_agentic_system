@@ -35,7 +35,7 @@ def phase1_route(state: dict[str, Any]) -> str:
     grade = recommendations.get("grade", "fail")
 
     # If critic passes or we've hit max iterations, finalize
-    if grade == "pass" or iteration >= max_iterations:
+    if grade == "pass" or iteration + 1 >= max_iterations:
         return "phase1_finalize"
     return "phase1_refine"
 

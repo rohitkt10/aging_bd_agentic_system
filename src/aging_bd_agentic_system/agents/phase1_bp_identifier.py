@@ -13,18 +13,20 @@ Workflow:
 """
 
 from __future__ import annotations
-
-import json
-from typing import Any
 from pdb import set_trace
+import json
+import time
+from typing import Any
 from aging_bd_agentic_system.literature_pipeline import config
 from aging_bd_agentic_system.llm import get_llm
-from aging_bd_agentic_system.llm.prompts import (
+from aging_bd_agentic_system.prompts.phase1_prompts import (
     PHASE1_CORPUS_SUMMARY_PROMPT,
     PHASE1_CRITIC_STRUCTURED_PROMPT,
+    PHASE1_CRITIC_SYSTEM_PROMPT,
     PHASE1_CRITIC_UNSTRUCTURED_PROMPT,
     PHASE1_PUBMED_SUMMARY_PROMPT,
     PHASE1_PLAN_SYSTEM_PROMPT,
+    PHASE1_REFINE_SYSTEM_PROMPT,
     PHASE1_SUMMARY_SYSTEM_PROMPT,
     PHASE1_SYSTEM_PROMPT,
 )
@@ -61,23 +63,29 @@ RESEARCH_PLAN_SCHEMA = {
 }
 
 BIOLOGICAL_PROCESS_SCHEMA = {
-    "title": "biological_processes",
-    "type": "array",
-    "items": {
-        "type": "object",
-        "properties": {
-            "process_name": {"type": "string"},
-            "evidence_score": {"type": "integer"},
-            "evidence_summary": {"type": "string"},
-            "sources": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": [
-            "process_name",
-            "evidence_score",
-            "evidence_summary",
-            "sources",
-        ],
+    "title": "biological_processes_wrapper",
+    "type": "object",
+    "properties": {
+        "processes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "process_name": {"type": "string"},
+                    "evidence_score": {"type": "integer"},
+                    "evidence_summary": {"type": "string"},
+                    "sources": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "process_name",
+                    "evidence_score",
+                    "evidence_summary",
+                    "sources",
+                ],
+            },
+        }
     },
+    "required": ["processes"],
 }
 
 CRITIC_STRUCTURED_SCHEMA = {
@@ -314,11 +322,11 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
 
 def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Execute the research plan and identify biological processes.
+    Execute research and identify biological processes.
 
-    Consumes the plan from phase1_plan and executes searches using the
-    suggested search terms. Each goal's results are summarized before
-    being aggregated for the identification LLM.
+    Two modes based on iteration:
+    - Initial (iteration 0): Execute plan goals, summarize per goal
+    - Refinement (iteration > 0): Execute critic queries only
 
     Args:
         state: Workflow state with phase1_plan and config
@@ -330,64 +338,59 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     lopez_context = state.get("lopez_otin_context", "")
     plan = state.get("phase1_plan", {})
     critic_recommendations = state.get("phase1_critic_recommendations", {})
+    existing_processes = state.get("biological_processes", [])
 
     # Read config from state
     cfg = state.get("config", {})
     p1 = cfg.get("phase1", {})
     vector_db_top_k = p1.get("vector_db_top_k", 20)
     pubmed_retmax = p1.get("pubmed_retmax", 10)
-    max_iterations = p1.get("max_iterations", 2)
     summary_max_words = p1.get("summary_max_words", 300)
 
-    # Track iteration
-    current_iteration = state.get("phase1_iteration", 0) + 1
+    # Determine current iteration
+    current_iteration = state.get("phase1_iteration", 0)
 
-    # 1. Execute searches per goal and summarize each goal's results
-    research_goals = plan.get("research_goals", [])
-    goal_summaries = []
+    llm = get_llm()
 
-    for goal in research_goals:
-        goal_text = goal.get("goal", "")
-        goal_corpus_results = []
-        goal_pubmed_results = []
+    # === TWO PATHS: INITIAL vs REFINEMENT ===
+    if current_iteration == 0:
+        # === INITIAL RESEARCH PATH ===
+        # Execute plan goals, summarize per goal, use PHASE1_SYSTEM_PROMPT
 
-        # Vector DB searches for this goal
-        for term in goal.get("vector_db_terms", []):
-            results = query_vector_db(query=term, top_k=vector_db_top_k)
-            goal_corpus_results.extend(results)
+        research_goals = plan.get("research_goals", [])
+        goal_summaries = []
 
-        # PubMed searches for this goal
-        for term in goal.get("pubmed_terms", []):
-            results = query_pubmed(query=term, retmax=pubmed_retmax)
-            goal_pubmed_results.extend(results)
-        
-        # Summarize this goal's results
-        if goal_corpus_results or goal_pubmed_results:
-            summary = _summarize_goal_results(
-                goal=goal_text,
-                hallmark_name=hallmark,
-                corpus_results=goal_corpus_results,
-                pubmed_results=goal_pubmed_results,
-                max_words=summary_max_words,
-            )
-            goal_summaries.append(summary)
+        for goal in research_goals:
+            goal_text = goal.get("goal", "")
+            goal_corpus_results = []
+            goal_pubmed_results = []
 
-    # 2. Execute additional searches from critic recommendations (if refining)
-    critic_corpus_results = []
-    critic_pubmed_results = []
-    if critic_recommendations:
-        for query in critic_recommendations.get("vector_db_queries", []):
-            results = query_vector_db(query=query, top_k=vector_db_top_k)
-            critic_corpus_results.extend(results)
+            # Vector DB searches for this goal
+            for term in goal.get("vector_db_terms", []):
+                results = query_vector_db(query=term, top_k=vector_db_top_k)
+                goal_corpus_results.extend(results)
 
-        for query in critic_recommendations.get("pubmed_queries", []):
-            results = query_pubmed(query=query, retmax=pubmed_retmax)
-            critic_pubmed_results.extend(results)
+            # PubMed searches for this goal (rate limited: 3 req/sec without API key)
+            for term in goal.get("pubmed_terms", []):
+                results = query_pubmed(query=term, retmax=pubmed_retmax)
+                goal_pubmed_results.extend(results)
+                time.sleep(0.34)  # Rate limit: stay under 3 req/sec
 
-    # 3. Build summarized context for LLM
-    summaries_section = ""
-    for i, summary in enumerate(goal_summaries):
-        summaries_section += f"""
+            # Summarize this goal's results
+            if goal_corpus_results or goal_pubmed_results:
+                summary = _summarize_goal_results(
+                    goal=goal_text,
+                    hallmark_name=hallmark,
+                    corpus_results=goal_corpus_results,
+                    pubmed_results=goal_pubmed_results,
+                    max_words=summary_max_words,
+                )
+                goal_summaries.append(summary)
+
+        # Build context for initial research
+        summaries_section = ""
+        for i, summary in enumerate(goal_summaries):
+            summaries_section += f"""
                             ### Goal {i+1}: {summary.get('goal', 'Unknown')}
                             **Corpus Summary:**
                             {summary.get('corpus_summary', 'No results')}
@@ -398,68 +401,119 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
                             ---
                             """
 
-    # Add critic recommendation results if present
-    critic_section = ""
-    if critic_corpus_results or critic_pubmed_results:
-        critic_corpus_text = _format_corpus_results(critic_corpus_results)
-        critic_pubmed_text = _format_pubmed_results(critic_pubmed_results)
-        critic_section = f"""
-                            ### Additional Results from Critique Recommendations
-                            **Corpus:**
-                            {critic_corpus_text}
+        user_context = f"""## Reference Context
 
-                            **PubMed:**
-                            {critic_pubmed_text}
+                            ### Lopez-Otin Hallmarks Paper
+                            {lopez_context}
+
+                            ## Summarized Research Findings by Goal
+                            {summaries_section}
+
+                            Identify biological processes related to {hallmark} based on this evidence.
                             """
 
-    # Include iteration context in prompt
-    iteration_context = ""
-    if current_iteration > 1:
-        iteration_context = f"""
-                            ## Iteration Context
-                            This is iteration {current_iteration} of {max_iterations}.
-                            Focus on: {', '.join(critic_recommendations.get('focus_areas', []))}
-                            """
+        system_prompt = PHASE1_SYSTEM_PROMPT.format(hallmark_name=hallmark)
 
-    if current_iteration == max_iterations:
-        iteration_context += (
-            "\nThis is the FINAL iteration. Produce the final list now."
-        )
+    else:
+        # === REFINEMENT RESEARCH PATH ===
+        # Execute critic queries only, use PHASE1_REFINE_SYSTEM_PROMPT
 
-    user_context = f"""## Reference Context
+        critic_corpus_results = []
+        critic_pubmed_results = []
 
-                    ### Lopez-Otin Hallmarks Paper
-                    {lopez_context}
+        # Execute critic-recommended vector DB queries
+        for query in critic_recommendations.get("vector_db_queries", []):
+            results = query_vector_db(query=query, top_k=vector_db_top_k)
+            critic_corpus_results.extend(results)
 
-                    ## Summarized Research Findings by Goal
-                    {summaries_section}
-                    {critic_section}
-                    {iteration_context}
-                    Identify biological processes related to {hallmark} based on this evidence.
-                    """
+        # Execute critic-recommended PubMed queries
+        for query in critic_recommendations.get("pubmed_queries", []):
+            results = query_pubmed(query=query, retmax=pubmed_retmax)
+            critic_pubmed_results.extend(results)
+            time.sleep(0.34)  # Rate limit: stay under 3 req/sec
 
-    # 4. Call LLM to identify processes
-    system_prompt = PHASE1_SYSTEM_PROMPT.format(hallmark_name=hallmark)
-    llm = get_llm()
-    set_trace()
+        # Summarize critic query results (avoids context explosion)
+        if critic_corpus_results or critic_pubmed_results:
+            summary = _summarize_goal_results(
+                goal="Critic refinement queries",
+                hallmark_name=hallmark,
+                corpus_results=critic_corpus_results,
+                pubmed_results=critic_pubmed_results,
+                max_words=summary_max_words,
+            )
+            corpus_summary = summary.get("corpus_summary", "No results")
+            pubmed_summary = summary.get("pubmed_summary", "No results")
+        else:
+            corpus_summary = "No results"
+            pubmed_summary = "No results"
+
+        # Format focus areas
+        focus_areas = critic_recommendations.get("focus_areas", [])
+        focus_areas_text = "\n".join([f"- {area}" for area in focus_areas]) if focus_areas else "None specified"
+
+        # Build context for refinement
+        user_context = f"""## Existing Biological Processes
+                        {json.dumps(existing_processes, indent=2)}
+
+                        ## Summarized New Evidence from Critic Queries
+
+                        **Corpus Summary:**
+                        {corpus_summary}
+
+                        **PubMed Summary:**
+                        {pubmed_summary}
+
+                        ## Focus Areas from Critic
+                        {focus_areas_text}
+
+                        Update the biological process list for {hallmark} based on this new evidence and focus areas.
+                        """
+
+        system_prompt = PHASE1_REFINE_SYSTEM_PROMPT.format(hallmark_name=hallmark)
+
+    # === CALL LLM ===
     try:
-        processes = llm.invoke_structured(
+        result = llm.invoke_structured(
             user_context,
             schema=BIOLOGICAL_PROCESS_SCHEMA,
             system_prompt=system_prompt,
         )
+
+        # Validate result follows schema (not returning schema itself)
+        processes = result.get("processes")
+        if not isinstance(processes, list) or (processes and "type" in processes):
+            # Schema mismatch - 1 retry to fix
+            print("Schema mismatch detected, retrying with fix prompt...")
+            fix_prompt = f"""The following JSON has a schema mismatch. Expected "processes" to be an array of objects with process_name, evidence_score, evidence_summary, sources.
+
+                            Got this instead:
+                            {json.dumps(result, indent=2)}
+
+                            Fix the format and return the corrected JSON with the same schema structure."""
+
+            result = llm.invoke_structured(
+                fix_prompt,
+                schema=BIOLOGICAL_PROCESS_SCHEMA,
+                system_prompt="You are a JSON format fixer. Return only corrected JSON.",
+            )
+            processes = result.get("processes")
+
+            # If still broken after retry, fail
+            if not isinstance(processes, list) or (processes and "type" in processes):
+                raise ValueError("Schema mismatch persists after retry")
+
+        processes = result["processes"]  # Extract array from wrapper object
     except Exception as e:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
         response = llm.invoke(user_context, system_prompt=system_prompt)
         processes = _extract_json_from_response(response)
-
-    # 5. Validate and deduplicate
+    set_trace()
+    # Validate and deduplicate
     if not processes:
         raise ValueError("LLM returned empty process list")
-
     processes = _deduplicate_processes(processes)
 
-    # 6. Add rank field
+    # Add rank field
     for idx, proc in enumerate(processes, start=1):
         proc["rank"] = idx
 
@@ -489,7 +543,6 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
 
     # Track iteration
     current_iteration = state.get("phase1_iteration", 0) + 1
-
     if not processes:
         return {
             "phase1_critique": "No biological processes identified.",
@@ -512,7 +565,7 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
         processes_json=processes_json,
     )
 
-    critique_text = llm.invoke(unstructured_prompt)
+    critique_text = llm.invoke(unstructured_prompt, system_prompt=PHASE1_CRITIC_SYSTEM_PROMPT)
 
     # Step 2: Structured recommendations
     structured_prompt = PHASE1_CRITIC_STRUCTURED_PROMPT.format(
@@ -522,13 +575,13 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         recommendations = llm.invoke_structured(
-            structured_prompt, schema=CRITIC_STRUCTURED_SCHEMA
+            structured_prompt, schema=CRITIC_STRUCTURED_SCHEMA, system_prompt=PHASE1_CRITIC_SYSTEM_PROMPT
         )
     except Exception as e:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(structured_prompt)
+        response = llm.invoke(structured_prompt, system_prompt=PHASE1_CRITIC_SYSTEM_PROMPT)
         recommendations = _extract_json_from_response(response)
-
+    set_trace()
     return {
         "phase1_critique": critique_text,
         "phase1_critic_recommendations": recommendations,
@@ -539,20 +592,19 @@ def phase1_refine(state: dict[str, Any]) -> dict[str, Any]:
     """
     Execute refinement based on critic recommendations.
 
-    This function re-runs the research step with additional queries from
-    the critic. The actual refinement logic is handled by phase1_research
-    when it sees critic_recommendations in state.
+    Increments iteration counter and calls phase1_research which will
+    execute critic queries and update the biological process list.
 
     Args:
         state: Workflow state with phase1_critic_recommendations and config
 
     Returns:
-        Updated biological_processes from re-running research
+        Updated biological_processes and phase1_iteration
     """
     # Increment iteration counter
     iteration = state.get("phase1_iteration", 0) + 1
 
-    # Re-run research with critic recommendations
+    # Run refinement research (phase1_research will use refinement path since iteration > 0)
     result = phase1_research(state)
     result["phase1_iteration"] = iteration
     return result
@@ -561,6 +613,9 @@ def phase1_refine(state: dict[str, Any]) -> dict[str, Any]:
 def phase1_finalize(state: dict[str, Any]) -> dict[str, Any]:
     """
     Finalize Phase 1 by sorting processes and creating BP queue.
+
+    If critic grade is "fail", first executes refinement research,
+    then finalizes. If grade is "pass", just finalizes.
 
     Args:
         state: Workflow state with biological_processes and config
@@ -573,8 +628,17 @@ def phase1_finalize(state: dict[str, Any]) -> dict[str, Any]:
     p1 = cfg.get("phase1", {})
     max_processes = p1.get("max_processes", 15)
 
-    processes = list(state.get("biological_processes", []))
-
+    # Check critic grade
+    critic_recommendations = state.get("phase1_critic_recommendations", {})
+    grade = critic_recommendations.get("grade", "fail")
+    
+    # If critic failed, do final refinement research before finalizing
+    if grade == "fail":
+        result = phase1_refine(state)
+        processes = result.get("biological_processes", [])
+    else:
+        processes = list(state.get("biological_processes", []))
+    
     # Sort by evidence score desc, then by process name
     processes.sort(
         key=lambda p: (-p.get("evidence_score", 0), p.get("process_name", ""))

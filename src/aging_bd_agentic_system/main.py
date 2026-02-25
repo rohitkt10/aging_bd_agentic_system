@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from aging_bd_agentic_system.config import RunConfig
+from aging_bd_agentic_system.config import REPO_ROOT, RunConfig
 from aging_bd_agentic_system.graph.workflow import build_workflow
 from aging_bd_agentic_system.llm import init_llm
 from aging_bd_agentic_system.observability.tracing import create_tracing_callback
@@ -46,7 +46,9 @@ def parse_args() -> argparse.Namespace:
 
     # Output
     parser.add_argument(
-        "--output-dir", default="outputs", help="Base directory for output artifacts"
+        "--output-dir",
+        default=str(REPO_ROOT / "outputs"),
+        help="Base directory for output artifacts",
     )
 
     # Phase 1 overrides

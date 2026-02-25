@@ -64,7 +64,7 @@ def query_pubmed(
     email: str | None = None,
     api_key: str | None = None,
     retmax: int = 10,
-    date_from: str | None = None,
+    date_from: str = "2010/01/01",
     date_to: str | None = None,
 ) -> list[dict[str, Any]]:
     """
@@ -75,8 +75,8 @@ def query_pubmed(
         email: NCBI contact email (falls back to NCBI_EMAIL env var)
         api_key: Optional NCBI API key (falls back to NCBI_API_KEY env var)
         retmax: Maximum number of results to return (default 10)
-        date_from: Start date filter in YYYY/MM/DD format (optional)
-        date_to: End date filter in YYYY/MM/DD format (optional)
+        date_from: Start date filter in YYYY/MM/DD format (default: 2010/01/01)
+        date_to: End date filter in YYYY/MM/DD format (default: None = present)
 
     Returns:
         List of papers, each containing:

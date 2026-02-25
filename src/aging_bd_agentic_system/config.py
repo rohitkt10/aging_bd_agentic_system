@@ -17,6 +17,10 @@ from typing import Any
 
 import yaml
 
+# Resolve repo root for absolute path defaults:
+# <repo>/src/aging_bd_agentic_system/config.py -> <repo>
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass
 class Phase1Config:
@@ -76,7 +80,7 @@ class RunConfig:
     """Top-level run configuration."""
 
     hallmark: str = ""
-    output_dir: Path = field(default_factory=lambda: Path("outputs"))
+    output_dir: Path = field(default_factory=lambda: REPO_ROOT / "outputs")
     use_llm_summarization: bool = True
     llm: LLMConfig = field(default_factory=LLMConfig)
     phase1: Phase1Config = field(default_factory=Phase1Config)

@@ -6,7 +6,7 @@
 # =============================================================================
 
 # Output directory for generated files
-output_dir: outputs
+output_dir: /home/rohitpc/projects/aging_bd_agentic_system/outputs
 
 # Use LLM summarization for research results (reduces context size)
 use_llm_summarization: true

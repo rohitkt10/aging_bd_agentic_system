@@ -4,14 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-import torch 
+import torch
 
 import faiss
 import numpy as np
 from pydantic import BaseModel, Field
 
 from aging_bd_agentic_system.literature_pipeline import config
-from aging_bd_agentic_system.literature_pipeline.embedding import embed_texts
 from aging_bd_agentic_system.literature_pipeline.config import EMBEDDING_MODEL_ID
 
 from sentence_transformers import SentenceTransformer
@@ -87,28 +86,6 @@ def _load_index_meta(meta_path: Path) -> dict[str, Any]:
     with meta_path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
-
-class VectorDbQuerySchema(BaseModel):
-    """Schema for vector DB search tool - enables LLM to understand parameters."""
-
-    query: str = Field(
-        description="Search text for the literature index (e.g., 'cellular senescence')"
-    )
-    top_k: int = Field(
-        default=5, description="Maximum number of chunks to return (1-50)"
-    )
-    index_dir: str | None = Field(
-        default=None,
-        description=(
-            "Optional path to FAISS artifacts directory (default: data/corpus/index)"
-        ),
-    )
-    device: str = Field(
-        default="cpu",
-        description="Embedding device ('cpu' or 'cuda'); must match available hardware",
-    )
-
-
 def query_vector_db(
     query: str,
     *,
@@ -147,14 +124,12 @@ def query_vector_db(
     index_dir = index_dir or config.INDEX_DIR
     faiss_path = index_dir / "faiss.index"
     lookup_path = index_dir / "lookup.jsonl"
-    meta_path = index_dir / "index.meta.json"
 
     if not faiss_path.exists():
         raise FileNotFoundError(f"FAISS index not found: {faiss_path}")
 
     index = faiss.read_index(str(faiss_path))
-    meta = _load_index_meta(meta_path)
-    model_id = meta.get("model_id", config.EMBEDDING_MODEL_ID)
+    lookup = _load_lookup(lookup_path)
 
     embeddings = embed_texts(
         [query],
@@ -164,7 +139,6 @@ def query_vector_db(
     ).astype(np.float32)
 
     scores, ids = index.search(embeddings, top_k)
-    lookup = _load_lookup(lookup_path)
 
     results: list[dict[str, Any]] = []
     for score, row_id in zip(scores[0].tolist(), ids[0].tolist()):
@@ -176,3 +150,87 @@ def query_vector_db(
         results.append({"score": float(score), **row})
 
     return results
+
+
+def query_vector_db_batch(
+    queries: list[str],
+    *,
+    top_k: int = 5,
+    index_dir: Path | None = None,
+    device: str = "cpu",
+) -> list[list[dict[str, Any]]]:
+    """
+    Batch version of query_vector_db - searches multiple queries efficiently.
+
+    Embeds all queries in one batch call (more efficient than individual calls),
+    then searches the FAISS index for each query separately to ensure identical
+    results to calling query_vector_db() individually.
+
+    Args:
+        queries: List of natural language search queries
+        top_k: Maximum number of chunks to return per query (default 5)
+        index_dir: Optional path to FAISS artifacts directory
+        device: Embedding device ("cpu" or "cuda")
+
+    Returns:
+        List of result lists, one per query (same order as input queries).
+        Each inner list has the same format as query_vector_db() return value.
+
+    Example:
+        results = query_vector_db_batch(
+            ["DNA damage aging", "cellular senescence"],
+            top_k=5
+        )
+        # results[0] = results for "DNA damage aging"
+        # results[1] = results for "cellular senescence"
+
+    Note:
+        Results are identical to calling query_vector_db() for each query:
+        batch_results = query_vector_db_batch(["q1", "q2"], top_k=5)
+        # batch_results[0] == query_vector_db("q1", top_k=5)
+        # batch_results[1] == query_vector_db("q2", top_k=5)
+    """
+    if not queries:
+        return []
+    if any(not q.strip() for q in queries):
+        raise ValueError("All queries must be non-empty.")
+    if top_k <= 0:
+        raise ValueError("top_k must be positive.")
+
+    index_dir = index_dir or config.INDEX_DIR
+    faiss_path = index_dir / "faiss.index"
+    lookup_path = index_dir / "lookup.jsonl"
+
+    if not faiss_path.exists():
+        raise FileNotFoundError(f"FAISS index not found: {faiss_path}")
+
+    index = faiss.read_index(str(faiss_path))
+    lookup = _load_lookup(lookup_path)
+
+    # Embed all queries in one batch (efficient)
+    embeddings = embed_texts(
+        queries,
+        batch_size=len(queries),
+        device=device,
+        normalize=True,
+    ).astype(np.float32)
+
+    # Search index for each query separately (ensures same results as individual calls)
+    all_results: list[list[dict[str, Any]]] = []
+    for i, query_embedding in enumerate(embeddings):
+        # Reshape to (1, dim) for FAISS search
+        query_emb = query_embedding.reshape(1, -1)
+        scores, ids = index.search(query_emb, top_k)
+
+        query_results: list[dict[str, Any]] = []
+        for score, row_id in zip(scores[0].tolist(), ids[0].tolist()):
+            if row_id == -1:
+                continue
+            row = lookup.get(int(row_id))
+            if not row:
+                continue
+            query_results.append({"score": float(score), **row})
+
+        all_results.append(query_results)
+
+    return all_results

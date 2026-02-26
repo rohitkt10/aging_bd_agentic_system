@@ -1,0 +1,36 @@
+# Smoke test config for end-to-end pipeline testing
+# Usage: python -m aging_bd_agentic_system.main --config config/test_config.yaml
+
+# Top-level settings
+hallmark: genomic instability  # Aging hallmark to research
+output_dir: outputs  # Base directory for output artifacts
+use_llm_summarization: true  # Use LLM for context summarization when token count exceeds limit
+phase1_only: true  # Terminate after Phase 1 (smoke test: skip gene research)
+
+# LLM settings
+llm:
+  provider: openai  # LLM provider: "vertex" or "openai"
+  model: gpt-5-nano  # Model name (provider-specific)
+  temperature: 0.7  # Sampling temperature (0.0 - 1.0)
+  max_tokens: null  # Max tokens in response (null for default)
+  vertex_location: us-central1  # Vertex AI region (only for provider: vertex)
+  openai_base_url: null  # Custom OpenAI base URL (null for default)
+
+# Phase 1: Biological Process Identification
+phase1:
+  min_research_goals: 2  # Minimum number of research goals to generate (smoke test: reduced)
+  max_research_goals: 3  # Maximum number of research goals to generate (smoke test: reduced)
+  phase1_vector_db_top_k: 5  # Vector DB results per query (smoke test: reduced)
+  phase1_pubmed_retmax: 5  # PubMed results per query (smoke test: reduced)
+  max_iterations: 1  # Max critique/refine loops (smoke test: reduced)
+  max_processes: 15  # Maximum final biological processes to output
+  summary_max_words: 300  # Max words per goal summary in LLM calls
+
+# Phase 2: Gene Research
+phase2:
+  max_research_iterations: 2  # ReAct research loop iterations per BP (smoke test: reduced from 7)
+  max_refine_iterations: 1  # Refinement loops after critic fail (smoke test: reduced from 3)
+  genage_seed_max_results: 10  # Max GenAge results during gene seeding (smoke test: reduced)
+  opengenes_seed_max_results: 10  # Max OpenGenes results during gene seeding (smoke test: reduced)
+  phase2_vector_db_top_k: 5  # Vector DB results per query (smoke test: reduced)
+  phase2_pubmed_retmax: 5  # PubMed results per query (smoke test: reduced)

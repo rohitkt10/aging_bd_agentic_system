@@ -28,8 +28,8 @@ class Phase1Config:
 
     min_research_goals: int = 4
     max_research_goals: int = 6
-    vector_db_top_k: int = 20
-    pubmed_retmax: int = 10
+    phase1_vector_db_top_k: int = 20
+    phase1_pubmed_retmax: int = 10
     max_iterations: int = 2
     max_processes: int = 15
     summary_max_words: int = 300
@@ -43,8 +43,8 @@ class Phase2Config:
     max_refine_iterations: int = 3
     genage_seed_max_results: int = 50
     opengenes_seed_max_results: int = 50
-    pubmed_max_results: int = 5
-    vector_db_max_results: int = 5
+    phase2_vector_db_top_k: int = 10
+    phase2_pubmed_retmax: int = 10
 
 
 @dataclass
@@ -82,6 +82,7 @@ class RunConfig:
     hallmark: str = ""
     output_dir: Path = field(default_factory=lambda: REPO_ROOT / "outputs")
     use_llm_summarization: bool = True
+    phase1_only: bool = False  # If True, terminate after Phase 1
     llm: LLMConfig = field(default_factory=LLMConfig)
     phase1: Phase1Config = field(default_factory=Phase1Config)
     phase2: Phase2Config = field(default_factory=Phase2Config)
@@ -92,6 +93,7 @@ class RunConfig:
             "hallmark": self.hallmark,
             "output_dir": str(self.output_dir),
             "use_llm_summarization": self.use_llm_summarization,
+            "phase1_only": self.phase1_only,
             "llm": asdict(self.llm),
             "phase1": asdict(self.phase1),
             "phase2": asdict(self.phase2),
@@ -109,10 +111,14 @@ class RunConfig:
         config = cls()
 
         # Merge top-level
+        if "hallmark" in data:
+            config.hallmark = data["hallmark"]
         if "output_dir" in data:
             config.output_dir = Path(data["output_dir"])
         if "use_llm_summarization" in data:
             config.use_llm_summarization = data["use_llm_summarization"]
+        if "phase1_only" in data:
+            config.phase1_only = data["phase1_only"]
 
         # Merge llm
         if "llm" in data:
@@ -141,25 +147,53 @@ class RunConfig:
             self.hallmark = kwargs["hallmark"]
         if kwargs.get("output_dir"):
             self.output_dir = Path(kwargs["output_dir"])
+        if kwargs.get("use_llm_summarization") is not None:
+            self.use_llm_summarization = kwargs["use_llm_summarization"]
+        if kwargs.get("phase1_only") is not None:
+            self.phase1_only = kwargs["phase1_only"]
+
+        # LLM
+        if kwargs.get("provider"):
+            self.llm.provider = kwargs["provider"]
+        if kwargs.get("model"):
+            self.llm.model = kwargs["model"]
+        if kwargs.get("temperature") is not None:
+            self.llm.temperature = kwargs["temperature"]
+        if kwargs.get("max_tokens") is not None:
+            self.llm.max_tokens = kwargs["max_tokens"]
+        if kwargs.get("vertex_location"):
+            self.llm.vertex_location = kwargs["vertex_location"]
+        if kwargs.get("openai_base_url"):
+            self.llm.openai_base_url = kwargs["openai_base_url"]
 
         # Phase 1
         if kwargs.get("min_research_goals") is not None:
             self.phase1.min_research_goals = kwargs["min_research_goals"]
         if kwargs.get("max_research_goals") is not None:
             self.phase1.max_research_goals = kwargs["max_research_goals"]
-        if kwargs.get("vector_db_top_k") is not None:
-            self.phase1.vector_db_top_k = kwargs["vector_db_top_k"]
-        if kwargs.get("pubmed_retmax") is not None:
-            self.phase1.pubmed_retmax = kwargs["pubmed_retmax"]
+        if kwargs.get("phase1_vector_db_top_k") is not None:
+            self.phase1.phase1_vector_db_top_k = kwargs["phase1_vector_db_top_k"]
+        if kwargs.get("phase1_pubmed_retmax") is not None:
+            self.phase1.phase1_pubmed_retmax = kwargs["phase1_pubmed_retmax"]
         if kwargs.get("max_iterations") is not None:
             self.phase1.max_iterations = kwargs["max_iterations"]
         if kwargs.get("max_processes") is not None:
             self.phase1.max_processes = kwargs["max_processes"]
+        if kwargs.get("summary_max_words") is not None:
+            self.phase1.summary_max_words = kwargs["summary_max_words"]
 
         # Phase 2
         if kwargs.get("max_research_iterations") is not None:
             self.phase2.max_research_iterations = kwargs["max_research_iterations"]
         if kwargs.get("max_refine_iterations") is not None:
             self.phase2.max_refine_iterations = kwargs["max_refine_iterations"]
+        if kwargs.get("genage_seed_max_results") is not None:
+            self.phase2.genage_seed_max_results = kwargs["genage_seed_max_results"]
+        if kwargs.get("opengenes_seed_max_results") is not None:
+            self.phase2.opengenes_seed_max_results = kwargs["opengenes_seed_max_results"]
+        if kwargs.get("phase2_vector_db_top_k") is not None:
+            self.phase2.phase2_vector_db_top_k = kwargs["phase2_vector_db_top_k"]
+        if kwargs.get("phase2_pubmed_retmax") is not None:
+            self.phase2.phase2_pubmed_retmax = kwargs["phase2_pubmed_retmax"]
 
         return self

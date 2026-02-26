@@ -15,6 +15,7 @@ Workflow:
 from __future__ import annotations
 from pdb import set_trace
 import json
+from pathlib import Path
 import time
 from typing import Any
 from aging_bd_agentic_system.literature_pipeline import config
@@ -30,7 +31,9 @@ from aging_bd_agentic_system.prompts.phase1_prompts import (
     PHASE1_SUMMARY_SYSTEM_PROMPT,
     PHASE1_SYSTEM_PROMPT,
 )
-from aging_bd_agentic_system.tools import query_pubmed, query_vector_db
+from aging_bd_agentic_system.tools import query_pubmed, query_vector_db, query_vector_db_batch
+from aging_bd_agentic_system.utils.output_writer import ensure_output_dir, write_processes_tsv
+from aging_bd_agentic_system.utils.audit_logger import log_event
 
 # =============================================================================
 # SCHEMA DEFINITIONS
@@ -319,7 +322,6 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
 
     return {"phase1_plan": plan}
 
-
 def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     """
     Execute research and identify biological processes.
@@ -343,8 +345,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     # Read config from state
     cfg = state.get("config", {})
     p1 = cfg.get("phase1", {})
-    vector_db_top_k = p1.get("vector_db_top_k", 20)
-    pubmed_retmax = p1.get("pubmed_retmax", 10)
+    vector_db_top_k = p1.get("phase1_vector_db_top_k", 20)
+    pubmed_retmax = p1.get("phase1_pubmed_retmax", 10)
     summary_max_words = p1.get("summary_max_words", 300)
 
     # Determine current iteration
@@ -359,16 +361,30 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
 
         research_goals = plan.get("research_goals", [])
         goal_summaries = []
-
+        print("\n" + "-" * 50)
+        print("RESEARCH GOALS")
+        print("-" * 50)
+        for i, goal in enumerate(research_goals, 1):
+            goal_text = goal.get("goal", "")
+            vector_db_terms = goal.get("vector_db_terms", [])
+            pubmed_terms = goal.get("pubmed_terms", [])
+            print(f"\n  [{i}] {goal_text}")
+            print(f"      vector_db_terms: {len(vector_db_terms)}, pubmed_terms: {len(pubmed_terms)}")
+        print("\n" + "-" * 50 + "\n")
         for goal in research_goals:
             goal_text = goal.get("goal", "")
             goal_corpus_results = []
             goal_pubmed_results = []
 
-            # Vector DB searches for this goal
-            for term in goal.get("vector_db_terms", []):
-                results = query_vector_db(query=term, top_k=vector_db_top_k)
-                goal_corpus_results.extend(results)
+            # Vector DB searches for this goal (batched)
+            vector_db_terms = goal.get("vector_db_terms", [])
+            if vector_db_terms:
+                batch_results = query_vector_db_batch(
+                    queries=vector_db_terms, top_k=vector_db_top_k
+                )
+                goal_corpus_results.extend(
+                    [rec for results in batch_results for rec in results]
+                )
 
             # PubMed searches for this goal (rate limited: 3 req/sec without API key)
             for term in goal.get("pubmed_terms", []):
@@ -421,16 +437,29 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
         critic_corpus_results = []
         critic_pubmed_results = []
 
-        # Execute critic-recommended vector DB queries
-        for query in critic_recommendations.get("vector_db_queries", []):
-            results = query_vector_db(query=query, top_k=vector_db_top_k)
-            critic_corpus_results.extend(results)
+        # Execute critic-recommended vector DB queries (batched)
+        vector_db_queries = critic_recommendations.get("vector_db_queries", [])
+        if vector_db_queries:
+            batch_results = query_vector_db_batch(
+                queries=vector_db_queries, top_k=vector_db_top_k
+            )
+            critic_corpus_results.extend(
+                [rec for results in batch_results for rec in results]
+            )
 
         # Execute critic-recommended PubMed queries
         for query in critic_recommendations.get("pubmed_queries", []):
             results = query_pubmed(query=query, retmax=pubmed_retmax)
             critic_pubmed_results.extend(results)
             time.sleep(0.34)  # Rate limit: stay under 3 req/sec
+
+        # Log refinement results
+        print("\n" + "-" * 50)
+        print("REFINEMENT RESEARCH")
+        print("-" * 50)
+        print(f"  vector_db_queries: {len(vector_db_queries)} -> {len(critic_corpus_results)} results")
+        print(f"  pubmed_queries: {len(critic_recommendations.get('pubmed_queries', []))} -> {len(critic_pubmed_results)} results")
+        print("-" * 50 + "\n")
 
         # Summarize critic query results (avoids context explosion)
         if critic_corpus_results or critic_pubmed_results:
@@ -507,7 +536,7 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
         response = llm.invoke(user_context, system_prompt=system_prompt)
         processes = _extract_json_from_response(response)
-    set_trace()
+    
     # Validate and deduplicate
     if not processes:
         raise ValueError("LLM returned empty process list")
@@ -581,7 +610,18 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
         response = llm.invoke(structured_prompt, system_prompt=PHASE1_CRITIC_SYSTEM_PROMPT)
         recommendations = _extract_json_from_response(response)
-    set_trace()
+
+    # Log critic results
+    print("\n" + "-" * 50)
+    print("CRITIC REVIEW")
+    print("-" * 50)
+    print(f"  Grade: {recommendations.get('grade', 'unknown')}")
+    print(f"  vector_db_queries: {len(recommendations.get('vector_db_queries', []))}")
+    print(f"  pubmed_queries: {len(recommendations.get('pubmed_queries', []))}")
+    focus_areas = recommendations.get('focus_areas', [])
+    print(f"  focus_areas: {', '.join(focus_areas) if focus_areas else 'none'}")
+    print("-" * 50 + "\n")
+
     return {
         "phase1_critique": critique_text,
         "phase1_critic_recommendations": recommendations,
@@ -603,10 +643,10 @@ def phase1_refine(state: dict[str, Any]) -> dict[str, Any]:
     """
     # Increment iteration counter
     iteration = state.get("phase1_iteration", 0) + 1
+    state["phase1_iteration"] = iteration
 
     # Run refinement research (phase1_research will use refinement path since iteration > 0)
     result = phase1_research(state)
-    result["phase1_iteration"] = iteration
     return result
 
 
@@ -653,5 +693,20 @@ def phase1_finalize(state: dict[str, Any]) -> dict[str, Any]:
 
     # Create queue for Phase 2
     bp_queue = [p["process_name"] for p in processes if p.get("process_name")]
+
+    # Save Phase 1 outputs
+    hallmark = state.get("hallmark_name", "unknown")
+    cfg = state.get("config", {})
+    output_dir = Path(cfg.get("output_dir", "outputs"))
+    out_dir = ensure_output_dir(output_dir, hallmark)
+    write_processes_tsv(out_dir, processes)
+
+    # Log Phase 1 completion event
+    log_event({
+        "hallmark": hallmark,
+        "event_type": "phase1_complete",
+        "biological_processes_count": len(processes),
+        "critic_grade": grade,
+    }, output_dir=output_dir)
 
     return {"biological_processes": processes, "bp_queue": bp_queue}

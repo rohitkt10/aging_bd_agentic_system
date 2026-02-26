@@ -72,8 +72,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     max_iterations = p2.get("max_research_iterations", 7)
     genage_seed_max_results = p2.get("genage_seed_max_results", 50)
     opengenes_seed_max_results = p2.get("opengenes_seed_max_results", 50)
-    pubmed_max_results = p2.get("pubmed_max_results", 5)
-    vector_db_max_results = p2.get("vector_db_max_results", 5)
+    vector_db_top_k = p2.get("phase2_vector_db_top_k", 10)
+    pubmed_retmax = p2.get("phase2_pubmed_retmax", 10)
 
     # Get current iteration
     current_iteration = state.get("phase2_research_iteration", 0)
@@ -186,13 +186,13 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             findings_json = json.dumps(high_value_findings[:10], indent=2)
 
             context_str = f"""## Research Summary
-Top Candidates: {top_cand_str}
-Total Findings: {total_findings}
-Research Gaps: {gaps_str}
+                            Top Candidates: {top_cand_str}
+                            Total Findings: {total_findings}
+                            Research Gaps: {gaps_str}
 
-## High-Value Findings
-{findings_json}
-"""
+                            ## High-Value Findings
+                            {findings_json}
+                            """
             context_parts.append(context_str)
         except json.JSONDecodeError:
             # Fallback to raw summary text
@@ -219,15 +219,15 @@ Research Gaps: {gaps_str}
 
     # Format user prompt with current state and get decision
     user_prompt = PHASE2_DECISION_USER_PROMPT.format(
-        current_iteration=current_iteration,
-        max_iterations=max_iterations,
-        phase=phase.upper(),
-        guidance=guidance,
-        candidates_summary="",  # Not used - context_str has everything
-        recent_findings=context_str,
-        min_actions=min_actions_per_iteration,
-        max_actions=max_actions_per_iteration,
-    )
+                            current_iteration=current_iteration,
+                            max_iterations=max_iterations,
+                            phase=phase.upper(),
+                            guidance=guidance,
+                            candidates_summary="",  # Not used - context_str has everything
+                            recent_findings=context_str,
+                            min_actions=min_actions_per_iteration,
+                            max_actions=max_actions_per_iteration,
+                        )
 
     # Get research decisions from LLM with structured output
     decision_schema = {
@@ -307,8 +307,8 @@ Research Gaps: {gaps_str}
                 )
 
         elif source == "pubmed":
-            results = query_pubmed(query=query, retmax=10)
-            for rec in results[:pubmed_max_results]:
+            results = query_pubmed(query=query, retmax=pubmed_retmax)
+            for rec in results:
                 new_findings.append(
                     {
                         "source": "pubmed",
@@ -319,8 +319,8 @@ Research Gaps: {gaps_str}
                 )
 
         elif source == "vector_db":
-            results = query_vector_db(query=query, top_k=10)
-            for rec in results[:vector_db_max_results]:
+            results = query_vector_db(query=query, top_k=vector_db_top_k)
+            for rec in results:
                 new_findings.append(
                     {
                         "source": "corpus",
@@ -644,6 +644,8 @@ def advance_bp(state: dict[str, Any]) -> dict[str, Any]:
     # Log BP completion with scratchpad snapshot for audit trail
     bp_name = state.get("current_bp_name", "")
     hallmark = state.get("hallmark_name", "")
+    cfg = state.get("config", {})
+    output_dir = cfg.get("output_dir", "outputs")
 
     if bp_name:
         # Get genes found for this BP
@@ -658,7 +660,8 @@ def advance_bp(state: dict[str, Any]) -> dict[str, Any]:
                 "research_scratchpad": state.get("research_scratchpad", ""),
                 "genes_count": len(bp_genes),
                 "iteration": state.get("phase2_research_iteration", 0),
-            }
+            },
+            output_dir=output_dir,
         )
 
     return {

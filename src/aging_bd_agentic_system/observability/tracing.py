@@ -32,24 +32,41 @@ class TracingCallbackHandler(BaseCallbackHandler):
     """
 
     def __init__(
-        self, log_dir: Path | None = None, *, hallmark_name: str | None = None
+        self,
+        log_dir: Path | None = None,
+        *,
+        hallmark_name: str | None = None,
+        output_dir: Path | str | None = None,
     ):
         """
         Initialize tracing handler.
 
         Args:
-            log_dir: Directory to store trace logs. If not provided, uses
-                     data/logs/ or logs/{hallmark}/ if hallmark_name given.
-            hallmark_name: Name of the hallmark being processed. If provided,
-                          logs are stored in logs/{hallmark}/.
+            log_dir: Explicit directory to store trace logs (highest priority).
+            hallmark_name: Name of the hallmark being processed.
+            output_dir: Base output directory (e.g., "outputs"). If provided,
+                        logs go to {output_dir}/{hallmark}/logs/
+
+        Priority for log directory:
+            1. log_dir (explicit)
+            2. output_dir/{hallmark}/logs/
+            3. logs/{hallmark}/ (default)
         """
         super().__init__()
-        # If hallmark_name provided, use logs/{hallmark}/, else use provided log_dir or default
+
+        # Sanitize hallmark name for use in directory path
+        safe_name = ""
         if hallmark_name:
-            # Sanitize hallmark name for use in directory path
             safe_name = (
                 hallmark_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
             )
+
+        # Determine log directory (priority: log_dir > output_dir > default)
+        if log_dir:
+            self.log_dir = log_dir
+        elif output_dir and safe_name:
+            self.log_dir = Path(output_dir) / safe_name / "logs"
+        elif safe_name:
             self.log_dir = Path("logs") / safe_name
         else:
             self.log_dir = log_dir or config.DATA_DIR / "logs"
@@ -251,15 +268,24 @@ class TracingCallbackHandler(BaseCallbackHandler):
         logger.info(f"Trace written to {summary_file}")
 
     def _sanitize(self, data: Any) -> Any:
-        """Sanitize data for logging (truncate large values)."""
-        if isinstance(data, dict):
+        """Sanitize data for logging (truncate large values, convert non-serializable)."""
+        # Handle LangChain message objects
+        if hasattr(data, "content"):
+            # SystemMessage, AIMessage, HumanMessage, etc.
+            return {"type": type(data).__name__, "content": str(data.content)[:500]}
+        elif isinstance(data, dict):
             return {k: self._sanitize(v) for k, v in data.items()}
         elif isinstance(data, list):
             return [self._sanitize(item) for item in data[:10]]  # Limit lists
         elif isinstance(data, str):
             return data[:500]  # Truncate strings
         else:
-            return data
+            try:
+                # Test if serializable
+                json.dumps(data)
+                return data
+            except (TypeError, ValueError):
+                return str(data)[:500]
 
 
 def setup_logging(level: int = logging.INFO) -> None:
@@ -289,17 +315,23 @@ def setup_logging(level: int = logging.INFO) -> None:
 
 
 def create_tracing_callback(
-    log_dir: Path | None = None, *, hallmark_name: str | None = None
+    log_dir: Path | None = None,
+    *,
+    hallmark_name: str | None = None,
+    output_dir: Path | str | None = None,
 ) -> TracingCallbackHandler:
     """
     Create a tracing callback handler.
 
     Args:
-        log_dir: Directory to store trace logs.
-        hallmark_name: Name of the hallmark being processed. If provided,
-                       logs are stored in logs/{hallmark}/.
+        log_dir: Explicit directory to store trace logs.
+        hallmark_name: Name of the hallmark being processed.
+        output_dir: Base output directory (e.g., "outputs"). If provided,
+                    logs go to {output_dir}/{hallmark}/logs/
 
     Returns:
         TracingCallbackHandler instance.
     """
-    return TracingCallbackHandler(log_dir=log_dir, hallmark_name=hallmark_name)
+    return TracingCallbackHandler(
+        log_dir=log_dir, hallmark_name=hallmark_name, output_dir=output_dir
+    )

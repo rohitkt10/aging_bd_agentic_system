@@ -50,7 +50,7 @@ def main() -> int:
             vector_db_top_k=5,
             pubmed_retmax=5,
             max_iterations=1,
-            max_processes=10,
+            max_processes=15,
         ),
     )
 

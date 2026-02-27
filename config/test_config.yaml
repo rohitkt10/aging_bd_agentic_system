@@ -31,6 +31,6 @@ phase2:
   max_research_iterations: 2  # ReAct research loop iterations per BP (smoke test: reduced from 7)
   max_refine_iterations: 1  # Refinement loops after critic fail (smoke test: reduced from 3)
   genage_seed_max_results: 10  # Max GenAge results during gene seeding (smoke test: reduced)
-  opengenes_seed_max_results: 10  # Max OpenGenes results during gene seeding (smoke test: reduced)
+  opengenes_seed_results_per_query: 10  # OpenGenes results per query during seeding (smoke test: reduced from 15)
   phase2_vector_db_top_k: 5  # Vector DB results per query (smoke test: reduced)
   phase2_pubmed_retmax: 5  # PubMed results per query (smoke test: reduced)

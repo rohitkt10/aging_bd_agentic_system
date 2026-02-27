@@ -23,10 +23,9 @@ from dotenv import load_dotenv
 # Load .env from project root
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from aging_bd_agentic_system.config import RunConfig
+from aging_bd_agentic_system.config import LLMConfig, Phase2Config, RunConfig
 from aging_bd_agentic_system.graph.workflow import build_phase2_graph
-from aging_bd_agentic_system.llm import init_llm
-
+from aging_bd_agentic_system.llm import init_llm, get_llm
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Phase 2 smoke test")
@@ -44,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-research-iterations",
         type=int,
-        default=1,
+        default=3,
         help="Max research iterations per BP (default: 1 for smoke test)",
     )
     return parser.parse_args()
@@ -94,21 +93,32 @@ def main() -> int:
     print(f"Loaded {len(bp_queue)} BPs from Phase 1")
     print(f"Testing BP [{args.bp_index}]: {bp_queue[args.bp_index]}")
 
+    # Configure LLM for OpenAI
+    llm_config = LLMConfig(
+                provider="openai",
+                model="gpt-5-nano",
+                temperature=0.7,
+    )
+
     # Build RunConfig from saved config dict
     config = RunConfig()
     config.hallmark = config_dict.get("hallmark", args.hallmark)
     config.output_dir = Path(config_dict.get("output_dir", str(output_dir)))
     config.use_llm_summarization = config_dict.get("use_llm_summarization", True)
     config.phase1_only = False  # We want to run Phase 2
+    config.llm = llm_config
 
     # Override for smoke test
     config.phase2.max_research_iterations = args.max_research_iterations
     config.phase2.max_refine_iterations = 1
     config.phase2.genage_seed_max_results = 10
-    config.phase2.opengenes_seed_max_results = 10
+    config.phase2.opengenes_seed_results_per_query = 15
+    config.phase2.phase2_vector_db_top_k = 5
+    config.phase2.phase2_pubmed_retmax =  5
 
     # Initialize LLM
     init_llm(config.llm)
+    client = get_llm()
 
     # Build initial state for Phase 2
     # Only process the single BP we want to test
@@ -133,9 +143,14 @@ def main() -> int:
     print(f"\n{'='*60}")
     print("Running Phase 2...")
     print(f"{'='*60}")
-    set_trace()
+    
+    # build graph for phase 2 research
     graph = build_phase2_graph()
+
+    # run phase 2 research
     result = graph.invoke(initial_state)
+
+    set_trace()
 
     # Summary
     genes = result.get("genes_found", [])

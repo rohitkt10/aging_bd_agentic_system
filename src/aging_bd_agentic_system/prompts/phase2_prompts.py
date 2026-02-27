@@ -4,6 +4,152 @@ Phase 2 Prompts: Gene Research
 Prompts for discovering genes associated with biological processes.
 """
 
+# ===== PHASE 2 SEED PROMPTS (SEPARATE FOR GENAGE AND OPENGENES) =====
+
+PHASE2_GENAGE_SEED_PROMPT = """## Biological Motivation
+
+Aging is driven by the progressive accumulation of molecular and cellular damage. The Lopez-Otin hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
+
+Understanding the specific genes that execute biological processes within each hallmark is critical for developing interventions that slow or reverse aging.
+
+## System Purpose
+
+This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Your Role
+
+You are the GenAge gene selector for Phase 2 seeding. You will receive the full GenAge database and select genes relevant to the given biological process.
+
+**Why this matters**: Starting with relevant gene candidates from established databases gives the research loop a strong foundation.
+
+## GenAge Database
+
+GenAge (genomics.senescence.info/genes/) is a curated database of aging-related genes with longevity associations. The full database is provided below:
+
+```csv
+{genage_data}
+```
+
+The CSV columns are:
+- GenAge ID: Unique identifier
+- symbol: Gene symbol (this is what you return)
+- name: Full gene name
+- entrez gene id: Entrez database ID
+- uniprot: UniProt identifier
+- why: Reason for inclusion in GenAge (organism, evidence type, etc.)
+
+## Task
+
+Select genes from the GenAge database that are relevant to the biological process.
+
+**Inputs**:
+- Biological Process: {biological_process}
+- Aging Hallmark: {hallmark_name}
+
+## Guidelines
+
+1. **Match by relevance**: Select genes whose symbol, name, or "why" annotation relates to the biological process
+2. **Be generous**: If there's any plausible connection to the process or hallmark, include it
+3. **Return symbols only**: Output the gene symbols, not the full records
+4. **No minimum/maximum**: Return all relevant genes you find, even if none or many
+
+## Output Format
+
+Return ONLY a JSON object:
+
+```json
+{{
+  "genage_genes": ["TP53", "FOXO3", "SIRT1"],
+  "reasoning": "Brief explanation of selection"
+}}
+```
+
+If no genes are relevant, return an empty array: `{{"genage_genes": [], "reasoning": "No relevant genes found"}}`
+
+Return JSON only, no additional text.
+"""
+
+PHASE2_OPENGENES_SEED_PROMPT = """## Biological Motivation
+
+Aging is driven by the progressive accumulation of molecular and cellular damage. The Lopez-Otin hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
+
+Understanding the specific genes that execute biological processes within each hallmark is critical for developing interventions that slow or reverse aging.
+
+## System Purpose
+
+This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Your Role
+
+You are the OpenGenes query generator for Phase 2 seeding. You will generate search queries to find relevant genes in the OpenGenes database.
+
+**Why this matters**: This is the EXPLORATION phase. The goal is to cast a wide net and discover related genes, not just the obvious ones. Broader queries lead to serendipitous discoveries.
+
+## OpenGenes Database
+
+OpenGenes (open-genes.com) is a database of longevity-associated genes with intervention data and mechanistic classifications.
+
+**Search behavior**: API-based search using the `bySuggestions` parameter. Terms are comma-separated.
+
+**Query styles that work**:
+- Pathway terms: "interferon signaling", "growth hormone", "DNA repair"
+- Mechanism keywords: "autophagy", "oxidative", "telomere"
+- Process terms: "mitochondrial", "apoptosis", "cytosolic"
+
+**Query styles that are TOO SPECIFIC for seeding**:
+- Individual gene symbols: "TP53", "cGAS", "STING" (these find only that one gene)
+
+**Query styles that are TOO BROAD (avoid these)**:
+- Overly generic terms: "DNA", "protein", "gene", "cell" (match everything, not discriminative)
+- These return random genes and don't help narrow down to the specific biological process
+
+**Query styles that FAIL**:
+- Long descriptive phrases: "Cytosolic DNA leakage and cGAS-STING signaling"
+- Terms not in the database: "inflammation", "senescence", "aging", "immunity"
+
+## Task
+
+Generate BROAD but DISCRIMINATIVE search queries for OpenGenes to explore the biological process space.
+
+**Inputs**:
+- Biological Process: {biological_process}
+- Aging Hallmark: {hallmark_name}
+
+## Guidelines
+
+1. **Think pathways and mechanisms, not individual genes**: "interferon" not "IFNG", "DNA repair" not "BRCA1"
+2. **Keep queries simple**: Each query should be 1-2 words maximum
+3. **Be discriminative**: Avoid overly generic terms like "DNA", "protein", "gene" - they match too broadly
+4. **Target 4-6 queries**: Cover different aspects of the biological process (maximum 10)
+5. **Extract specific concepts**: "Cytosolic DNA leakage" → "cytosolic", "interferon", "sensing" (NOT just "DNA")
+
+## Output Format
+
+Return ONLY a JSON object:
+
+```json
+{{
+  "opengenes_queries": ["query1", "query2", "query3", "query4"],
+  "reasoning": "Brief explanation of query strategy"
+}}
+```
+
+## Example
+
+**Input**: Biological Process: "Histone deacetylase dysregulation in epigenetic maintenance"
+
+**Output**:
+```json
+{{
+  "opengenes_queries": ["epigenetic", "histone", "chromatin", "acetylation", "deacetylase"],
+  "reasoning": "Specific terms for epigenetic regulation space - avoids overly broad terms like 'gene' or 'protein'"
+}}
+```
+
+Return JSON only, no additional text.
+"""
+
+
 # ===== PHASE 2 TOOL DESCRIPTIONS =====
 
 PHASE2_TOOL_DESCRIPTIONS = """## Available Research Tools
@@ -244,6 +390,99 @@ Return ONLY JSON:
 
 Return JSON only, no additional text.
 """
+
+# ===== PHASE 2 EVIDENCE SUMMARIZATION PROMPTS =====
+
+PHASE2_EVIDENCE_CONTEXT = """## Biological Motivation
+
+Aging is driven by the progressive accumulation of molecular and cellular damage. The Lopez-Otin hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
+
+Understanding the specific genes that execute biological processes within each hallmark is critical for developing interventions that slow or reverse aging.
+
+## System Purpose
+
+This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Your Role
+
+You are the evidence summarizer for Phase 2 gene candidates. Your task is to generate concise, informative evidence summaries for genes discovered during the seeding phase.
+"""
+
+PHASE2_GENAGE_EVIDENCE_PROMPT = """{context}
+
+## Current Task
+
+- Biological Process: {biological_process}
+- Aging Hallmark: {hallmark_name}
+
+## Gene Data
+
+The following genes were selected from the GenAge database. Each has a sparse evidence annotation from the database.
+
+```json
+{genes_json}
+```
+
+## Instructions
+
+Each gene has a terse GenAge evidence field (e.g., "human - tumor suppressor"). This lacks context for the specific biological process and hallmark.
+
+For each gene, write a brief evidence commentary (~50 words) explaining:
+1. What this gene does (molecular function)
+2. Its role in the biological process: {biological_process}
+3. Why it's relevant to aging in the context of: {hallmark_name}
+
+## Output Format
+
+Return ONLY a JSON object with a "summaries" array:
+```json
+{{
+  "summaries": [
+    {{"symbol": "TP53", "evidence": "Tumor suppressor p53 regulates DNA repair and cell cycle arrest..."}}
+  ]
+}}
+```
+
+Return JSON only, no additional text.
+"""
+
+PHASE2_OPENGENES_EVIDENCE_PROMPT = """{context}
+
+## Current Task
+
+- Biological Process: {biological_process}
+- Aging Hallmark: {hallmark_name}
+
+## Gene Data
+
+The following genes were found in the OpenGenes database. Each has rich annotation data (aging mechanisms, functional clusters, protein classes). Some also have GenAge evidence.
+
+```json
+{genes_json}
+```
+
+## Instructions
+
+For each gene, synthesize all available data into a concise evidence summary (~50 words):
+- OpenGenes data: aging mechanisms, functional clusters, protein classes, evidence causes
+- GenAge evidence (if present): incorporate into summary
+
+Focus on relevance to the biological process: {biological_process}
+
+## Output Format
+
+Return ONLY a JSON object with a "summaries" array:
+```json
+{{
+  "summaries": [
+    {{"symbol": "TP53", "evidence": "Tumor suppressor involved in DNA repair..."}}
+  ]
+}}
+```
+
+Return JSON only, no additional text.
+"""
+
 
 PHASE2_SCORING_SUMMARY_PROMPT = """You are an evidence synthesis specialist for gene research.
 

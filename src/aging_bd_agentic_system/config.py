@@ -42,7 +42,7 @@ class Phase2Config:
     max_research_iterations: int = 7
     max_refine_iterations: int = 3
     genage_seed_max_results: int = 50
-    opengenes_seed_max_results: int = 50
+    opengenes_seed_results_per_query: int = 15
     phase2_vector_db_top_k: int = 10
     phase2_pubmed_retmax: int = 10
 
@@ -189,8 +189,8 @@ class RunConfig:
             self.phase2.max_refine_iterations = kwargs["max_refine_iterations"]
         if kwargs.get("genage_seed_max_results") is not None:
             self.phase2.genage_seed_max_results = kwargs["genage_seed_max_results"]
-        if kwargs.get("opengenes_seed_max_results") is not None:
-            self.phase2.opengenes_seed_max_results = kwargs["opengenes_seed_max_results"]
+        if kwargs.get("opengenes_seed_results_per_query") is not None:
+            self.phase2.opengenes_seed_results_per_query = kwargs["opengenes_seed_results_per_query"]
         if kwargs.get("phase2_vector_db_top_k") is not None:
             self.phase2.phase2_vector_db_top_k = kwargs["phase2_vector_db_top_k"]
         if kwargs.get("phase2_pubmed_retmax") is not None:

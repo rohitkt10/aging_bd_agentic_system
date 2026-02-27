@@ -7,8 +7,18 @@ Uses LLM-powered reasoning to identify genes and GO terms for biological process
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
+from pdb import set_trace
 
+from aging_bd_agentic_system.agents.phase2_helpers import (
+    _get_genage_lookup,
+    _load_genage_csv,
+    generate_opengenes_seed_queries,
+    normalize_seed_candidates,
+    select_genage_seed_genes,
+    summarize_seed_evidence,
+)
 from aging_bd_agentic_system.llm import get_llm
 from aging_bd_agentic_system.prompts.phase2_prompts import (
     PHASE2_CRITIQUE_SYSTEM_PROMPT,
@@ -19,7 +29,6 @@ from aging_bd_agentic_system.prompts.phase2_prompts import (
     PHASE2_TOOL_DESCRIPTIONS,
 )
 from aging_bd_agentic_system.tools import (
-    query_genage,
     query_go_terms,
     query_opengenes,
     query_pubmed,
@@ -31,6 +40,8 @@ from aging_bd_agentic_system.utils.context_manager import (
     summarize_if_needed,
 )
 
+
+# ===== GRAPH NODE FUNCTIONS =====
 
 def select_bp(state: dict[str, Any]) -> dict[str, Any]:
     """Select the current biological process from the queue."""
@@ -56,7 +67,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     Config read from state["config"]["phase2"]:
     - max_research_iterations: Max iterations (default 7)
     - genage_seed_max_results: GenAge results during seeding (default 50)
-    - opengenes_seed_max_results: OpenGenes results during seeding (default 50)
+    - opengenes_seed_results_per_query: OpenGenes results per query during seeding (default 15)
     - pubmed_max_results: PubMed results per action (default 5)
     - vector_db_max_results: Vector DB results per action (default 5)
 
@@ -71,7 +82,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     p2 = cfg.get("phase2", {})
     max_iterations = p2.get("max_research_iterations", 7)
     genage_seed_max_results = p2.get("genage_seed_max_results", 50)
-    opengenes_seed_max_results = p2.get("opengenes_seed_max_results", 50)
+    opengenes_seed_results_per_query = p2.get("opengenes_seed_results_per_query", 15)
     vector_db_top_k = p2.get("phase2_vector_db_top_k", 10)
     pubmed_retmax = p2.get("phase2_pubmed_retmax", 10)
 
@@ -80,35 +91,50 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
 
     # Initialize scratchpad if first iteration
     if current_iteration == 0:
-        # Seed with candidates from databases
-        genage_results = query_genage(
-            query=bp_name, max_results=genage_seed_max_results
-        )
-        opengenes_results = query_opengenes(
-            query=bp_name, max_results=opengenes_seed_max_results
-        )
+        print(f"\n{'='*60}")
+        print(f"SEEDING: {bp_name}")
+        print(f"{'='*60}")
 
-        # Combine and dedupe
-        seen = set()
+        # Load GenAge CSV data
+        genage_csv_data = _load_genage_csv()
+
+        # Step 1: Select genes directly from GenAge using LLM
+        print("  Selecting GenAge genes via LLM...")
+        genage_gene_symbols = select_genage_seed_genes(bp_name, hallmark, genage_csv_data)
+        print(f"{len(genage_gene_symbols)} GenAge genes selected: {genage_gene_symbols}")
+
+        # Step 2: Generate queries for OpenGenes using LLM
+        print("  Generating OpenGenes queries via LLM...")
+        opengenes_queries = generate_opengenes_seed_queries(bp_name, hallmark)
+        print(f"{len(opengenes_queries)}  OpenGenes queries: {opengenes_queries}")
+
+        # Build candidate list
         candidates = []
 
-        for rec in genage_results:
-            symbol = rec.get("symbol")
-            if symbol and symbol not in seen:
-                seen.add(symbol)
+        # Add GenAge genes (lookup from cached GenAge data)
+        genage_lookup = _get_genage_lookup()
+        for symbol in genage_gene_symbols:
+            if symbol in genage_lookup:
+                rec = genage_lookup[symbol]
                 candidates.append(
                     {
                         "symbol": symbol,
                         "name": rec.get("name", ""),
                         "source": "genage",
-                        "evidence_type": rec.get("why", ""),
+                        "evidence": rec.get("why", ""),
                     }
                 )
 
-        for rec in opengenes_results:
-            symbol = rec.get("symbol")
-            if symbol and symbol not in seen:
-                seen.add(symbol)
+        # Query OpenGenes with each generated query
+        # Note: OpenGenes API requires comma-separated terms, not space-separated
+        # Convert "DNA sensing" -> "DNA, sensing" for better results
+
+        for query in opengenes_queries:
+            formatted_query = query.replace(" ", ", ")
+            opengenes_results = query_opengenes(query=formatted_query, max_results=opengenes_seed_results_per_query)
+            print(f"    OpenGenes '{formatted_query}': {len(opengenes_results)} results")
+            for rec in opengenes_results:
+                symbol = rec.get("symbol")
                 candidates.append(
                     {
                         "symbol": symbol,
@@ -118,14 +144,48 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
                         "functional_clusters": rec.get("functionalClusters", []),
                         "protein_classes": rec.get("proteinClasses", []),
                         "evidence_causes": rec.get("commentCause", []),
+                        "query_used": query,
                     }
                 )
+
+        print(f"\n  Raw candidates: {len(candidates)}")
+        print(f"    - GenAge: {len([c for c in candidates if c['source'] == 'genage'])}")
+        print(f"    - OpenGenes: {len([c for c in candidates if c['source'] == 'opengenes'])}")
+
+        # Normalize and deduplicate candidates
+        candidates = normalize_seed_candidates(candidates)
+
+        # Count by source type
+        genage_only = len([c for c in candidates if c['source'] == 'genage'])
+        opengenes_only = len([c for c in candidates if c['source'] == 'opengenes'])
+        both = len([c for c in candidates if c['source'] == 'genage, opengenes'])
+
+        print(f"\n  Normalized: {len(candidates)} unique genes")
+        print(f"    - GenAge only: {genage_only}")
+        print(f"    - OpenGenes only: {opengenes_only}")
+        print(f"    - Both: {both}")
+
+        # Summarize evidence via LLM
+        print(f"\n  Summarizing evidence...")
+        candidates = summarize_seed_evidence(candidates, bp_name, hallmark)
+        print(f"  Evidence summarization complete")
+        print(f"{'='*60}\n")
+
+        # Persist seed genes to disk
+        bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed
+        output_dir = Path(cfg.get("output_dir", "outputs"))
+        seed_file = output_dir / hallmark / f"bp{bp_rank}_seed_genes.json"
+        seed_file.parent.mkdir(parents=True, exist_ok=True)
+        with seed_file.open("w") as f:
+            json.dump(candidates, f, indent=2)
+        print(f"  Saved seed genes to: {seed_file}")
 
         # Store in scratchpad as structured JSON
         research_data = {
             "initial_database_genes": candidates,
             "research_findings": [],  # Accumulated findings from iterations
         }
+
         return {
             "research_scratchpad": json.dumps(research_data, default=str),
             "phase2_research_iteration": 1,
@@ -137,10 +197,13 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     except json.JSONDecodeError:
         research_data = {"initial_database_genes": [], "research_findings": []}
 
+    set_trace()
     # Add context management
     context_updates = summarize_if_needed(state)
     if context_updates:
         state.update(context_updates)
+    
+    set_trace()
 
     llm = get_llm()
 
@@ -277,6 +340,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         query = action.get("query")
 
         if source == "genage":
+            from aging_bd_agentic_system.tools import query_genage
             results = query_genage(query=query, max_results=20)
             for rec in results:
                 new_findings.append(
@@ -572,16 +636,16 @@ def map_go_terms(state: dict[str, Any]) -> dict[str, Any]:
     # User message contains the GO terms data
     user_context = f"""## GO Terms to Evaluate
 
-                        {json.dumps(go_results, indent=2)}
+                    {json.dumps(go_results, indent=2)}
 
-                        For each GO term, provide:
-                        - go_id (exactly as provided)
-                        - go_label (exactly as provided)
-                        - relevance_score (1-10, only include terms with score 6+)
-                        - evidence_summary (1-2 sentences explaining relevance)
+                    For each GO term, provide:
+                    - go_id (exactly as provided)
+                    - go_label (exactly as provided)
+                    - relevance_score (1-10, only include terms with score 6+)
+                    - evidence_summary (1-2 sentences explaining relevance)
 
-                        Return a JSON array.
-                        """
+                    Return a JSON array.
+                    """
 
     # System prompt with instructions
     system_prompt = PHASE2_GO_MAPPING_SYSTEM_PROMPT.format(

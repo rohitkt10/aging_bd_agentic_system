@@ -11,15 +11,23 @@ This system automates the curation of aging-related gene lists by:
 
 The system uses a LangGraph-based workflow with an autonomous ReAct research loop, querying multiple evidence sources (GenAge, OpenGenes, PubMed, literature corpus, Gene Ontology) and leveraging LLM-powered critique and refinement.
 
+## Status
+
+- ✅ **Phase 1 (BP Discovery):** Implemented and tested
+- 🔄 **Phase 2 (Gene Research):** Implemented, smoke testing in progress
+- ✅ **Multi-provider LLM:** OpenAI and Vertex AI supported
+- ✅ **Observability:** Tracing and audit logging
+
 ## Features
 
 - **Autonomous Research Loop:** ReAct-style iterative research with configurable iteration limits
 - **Multi-Source Evidence:** Queries GenAge, OpenGenes, PubMed, FAISS-indexed literature corpus, and Gene Ontology
-- **LLM-Powered Intelligence:** Uses Vertex AI Gemini for planning, extraction, critique, and refinement
+- **Multi-Provider LLM Support:** OpenAI GPT-4o/GPT-4o-mini and Vertex AI Gemini models
 - **Structured Outputs:** Produces validated TSV files for biological processes, genes, and GO terms
 - **Full Observability:** Two-tier logging with per-call traces and audit events
-- **Configurable:** Environment variables control iteration limits, model selection, and behavior
+- **Configurable:** YAML config files with CLI overrides; config hierarchy: defaults → YAML → CLI
 - **Auditable:** Complete state export and trace files for every run
+- **Independent Smoke Tests:** Phase 1 and Phase 2 can be tested independently
 
 ## Architecture
 
@@ -56,9 +64,9 @@ uv sync
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env with your VERTEX_PROJECT_ID and NCBI_EMAIL
+# Edit .env with your OPENAI_API_KEY (for OpenAI) or VERTEX_PROJECT_ID (for Vertex AI)
 
-# 3. Set up Google Cloud credentials
+# 3. (Optional) Set up Google Cloud credentials if using Vertex AI
 gcloud auth application-default login
 
 # 4. Run for a hallmark
@@ -66,6 +74,28 @@ python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
 
 # 5. Check outputs
 ls outputs/epigenetic_alterations/
+```
+
+### Using Config Files
+
+```bash
+# Run with a config file (recommended for reproducibility)
+python -m aging_bd_agentic_system.main --config config/test_config.yaml
+
+# Run Phase 1 only (skip gene research)
+python -m aging_bd_agentic_system.main --hallmark "genomic instability" --phase1-only true
+```
+
+### Smoke Tests
+
+Test each phase independently:
+
+```bash
+# Phase 1 smoke test (BP discovery)
+python scripts/phase1_research_smoketest.py
+
+# Phase 2 smoke test (uses saved Phase 1 data)
+python scripts/phase2_research_smoketest.py --hallmark "genomic instability" --bp-index 0
 ```
 
 ## Installation
@@ -101,22 +131,59 @@ python scripts/build_index.py
 
 ## Configuration
 
-Create a `.env` file with the following variables:
+Configuration follows a priority hierarchy: **defaults → YAML file → CLI arguments**
+
+### Environment Variables (.env)
+
+Secrets only (API keys, project IDs):
 
 ```bash
-# Required
+# OpenAI (default provider)
+OPENAI_API_KEY=your-openai-api-key
+
+# Vertex AI (alternative provider)
 VERTEX_PROJECT_ID=your-google-cloud-project-id
-NCBI_EMAIL=your-email@example.com
-
-# Optional (with defaults)
 VERTEX_LOCATION=us-central1
-VERTEX_MODEL=gemini-2.0-flash-exp-01-21
-LLM_TEMPERATURE=0.7
 
-# Workflow tuning
-PHASE1_MAX_ITERATIONS=3
-PHASE2_RESEARCH_MAX_ITERATIONS=7
-PHASE2_REFINE_MAX_ITERATIONS=3
+# Required for both providers
+NCBI_EMAIL=your-email@example.com
+NCBI_API_KEY=optional-ncbi-api-key  # Faster PubMed queries
+```
+
+### YAML Config File
+
+Create a config file for reproducible runs:
+
+```yaml
+# config/test_config.yaml
+hallmark: "genomic instability"
+output_dir: "outputs"
+phase1_only: true  # Set to false to run Phase 2
+
+llm:
+  provider: openai  # or "vertex"
+  model: gpt-4o     # or "gemini-2.0-flash-exp-01-21"
+  temperature: 0.7
+
+phase1:
+  max_iterations: 2
+  max_processes: 15
+
+phase2:
+  max_research_iterations: 7
+  max_refine_iterations: 3
+```
+
+### CLI Overrides
+
+All config options can be overridden via CLI:
+
+```bash
+python -m aging_bd_agentic_system.main \
+    --config config/test_config.yaml \
+    --provider openai \
+    --model gpt-4o-mini \
+    --max-research-iterations 3
 ```
 
 See [.env.example](.env.example) for all available options.
@@ -126,7 +193,11 @@ See [.env.example](.env.example) for all available options.
 ### Basic Usage
 
 ```bash
+# Run with defaults (OpenAI gpt-4o)
 python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
+
+# Run with Vertex AI
+python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations" --provider vertex --model gemini-2.0-flash-exp-01-21
 ```
 
 ### Available Hallmarks
@@ -273,6 +344,7 @@ python -m pytest tests/ -v --cov=src/aging_bd_agentic_system
 - [RUNBOOK.md](docs/RUNBOOK.md) - Operations runbook
 - [project-structure.md](docs/project-structure.md) - Project structure
 - [plans/](docs/plans/) - Implementation phase plans
+- [ctx_patterns/](docs/ctx_patterns/) - Context management patterns and lessons learned
 
 ## Troubleshooting
 
@@ -280,8 +352,9 @@ python -m pytest tests/ -v --cov=src/aging_bd_agentic_system
 
 | Issue | Solution |
 |-------|----------|
-| `VERTEX_PROJECT_ID not set` | Add to `.env` file |
-| `Credentials not found` | Run `gcloud auth application-default login` |
+| `OPENAI_API_KEY not set` | Add to `.env` file |
+| `VERTEX_PROJECT_ID not set` | Add to `.env` file (only if using Vertex AI) |
+| `Credentials not found` | Run `gcloud auth application-default login` (Vertex AI only) |
 | `No biological processes` | Check LLM errors in trace logs |
 | `Empty gene list` | Verify GenAge/OpenGenes data files exist |
 | `PubMed rate limited` | Add `NCBI_API_KEY` to `.env` |

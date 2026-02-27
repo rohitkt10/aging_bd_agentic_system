@@ -92,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         "--genage-seed-max-results", type=int, help="Max GenAge results during gene seeding"
     )
     parser.add_argument(
-        "--opengenes-seed-max-results", type=int, help="Max OpenGenes results during gene seeding"
+        "--opengenes-seed-results-per-query", type=int, help="OpenGenes results per query during gene seeding"
     )
     parser.add_argument(
         "--phase2-vector-db-top-k", type=int, help="Phase 2: Vector DB results per query"
@@ -145,7 +145,7 @@ def _print_config(config: RunConfig) -> None:
     print(f"  max_research_iterations: {p2.get('max_research_iterations')}")
     print(f"  max_refine_iterations: {p2.get('max_refine_iterations')}")
     print(f"  genage_seed_max_results: {p2.get('genage_seed_max_results')}")
-    print(f"  opengenes_seed_max_results: {p2.get('opengenes_seed_max_results')}")
+    print(f"  opengenes_seed_results_per_query: {p2.get('opengenes_seed_results_per_query')}")
     print(f"  phase2_vector_db_top_k: {p2.get('phase2_vector_db_top_k')}")
     print(f"  phase2_pubmed_retmax: {p2.get('phase2_pubmed_retmax')}")
 
@@ -211,7 +211,7 @@ def main() -> None:
         max_research_iterations=args.max_research_iterations,
         max_refine_iterations=args.max_refine_iterations,
         genage_seed_max_results=args.genage_seed_max_results,
-        opengenes_seed_max_results=args.opengenes_seed_max_results,
+        opengenes_seed_results_per_query=args.opengenes_seed_results_per_query,
         phase2_vector_db_top_k=args.phase2_vector_db_top_k,
         phase2_pubmed_retmax=args.phase2_pubmed_retmax,
     )

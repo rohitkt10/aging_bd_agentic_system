@@ -64,6 +64,7 @@ wandb/
 mlruns/
 logs/
 data/
+notebooks/
 
 # misc 
 #docs/

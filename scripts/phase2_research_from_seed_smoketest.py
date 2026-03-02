@@ -163,6 +163,7 @@ def main() -> int:
         print(f"Warning: gene_evidence file not found: {evidence_file}")
         gene_evidence = {}
 
+
     # Load state_of_knowledge from disk
     sok_file = output_dir / args.hallmark / f"bp{args.bp_rank}_state_of_knowledge.json"
     if sok_file.exists():
@@ -221,6 +222,8 @@ def main() -> int:
     print(f"{'='*60}")
     print(f"Genes found: {len(genes)}")
     print(f"GO terms found: {len(go_terms)}")
+
+    set_trace()
 
     if genes:
         print("\nTop genes:")

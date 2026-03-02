@@ -690,7 +690,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             scored_genes = []
         for gene in scored_genes:
             gene["biological_process"] = bp_name
-        
+        set_trace()
         return {
             "genes_found": scored_genes,
             "research_scratchpad": json.dumps(research_data, default=str),

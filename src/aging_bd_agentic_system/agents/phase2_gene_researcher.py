@@ -22,23 +22,25 @@ from aging_bd_agentic_system.agents.phase2_helpers import (
 from aging_bd_agentic_system.llm import get_llm
 from aging_bd_agentic_system.prompts.phase2_prompts import (
     PHASE2_CRITIQUE_SYSTEM_PROMPT,
+    PHASE2_DECIDE_PROMPT,
     PHASE2_DECISION_USER_PROMPT,
     PHASE2_GO_MAPPING_SYSTEM_PROMPT,
     PHASE2_RESEARCH_SYSTEM_PROMPT,
     PHASE2_SCORING_SYSTEM_PROMPT,
+    PHASE2_STATE_UPDATE_PROMPT,
+    PHASE2_SYNTHESIZE_PROMPT,
     PHASE2_TOOL_DESCRIPTIONS,
+    PHASE2_TOOL_SUMMARIZER_PROMPT,
 )
 from aging_bd_agentic_system.tools import (
     query_go_terms,
     query_opengenes,
     query_pubmed,
     query_vector_db,
+    query_vector_db_batch,
 )
 from aging_bd_agentic_system.utils.audit_logger import log_event
-from aging_bd_agentic_system.utils.context_manager import (
-    summarize_for_scoring,
-    summarize_if_needed,
-)
+from aging_bd_agentic_system.utils.context_manager import summarize_if_needed
 
 
 # ===== GRAPH NODE FUNCTIONS =====
@@ -52,6 +54,180 @@ def select_bp(state: dict[str, Any]) -> dict[str, Any]:
         return {}  # Signal to exit loop
 
     return {"current_bp_name": bp_queue[index]}
+
+
+def phase2_seeding(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Generate seed genes from GenAge and OpenGenes for a biological process.
+
+    This is iteration 0 of the Phase 2 research loop. It:
+    1. Selects relevant genes from GenAge using LLM
+    2. Generates OpenGenes queries using LLM
+    3. Queries OpenGenes with those queries
+    4. Normalizes and deduplicates candidates
+    5. Summarizes evidence via LLM
+    6. Persists seeds and queries to disk
+    7. Initializes the research scratchpad
+
+    Returns:
+        Dict with research_scratchpad (JSON) and phase2_research_iteration set to 1
+    """
+    bp_name = state.get("current_bp_name", "").strip()
+    hallmark = state.get("hallmark_name")
+    cfg = state.get("config", {})
+    p2 = cfg.get("phase2", {})
+    opengenes_seed_results_per_query = p2.get("opengenes_seed_results_per_query", 15)
+
+    print(f"\n{'='*60}")
+    print(f"SEEDING: {bp_name}")
+    print(f"{'='*60}")
+
+    # Load GenAge CSV data
+    genage_csv_data = _load_genage_csv()
+
+    # Step 1: Select genes directly from GenAge using LLM
+    print("  Selecting GenAge genes via LLM...")
+    genage_gene_symbols = select_genage_seed_genes(bp_name, hallmark, genage_csv_data)
+    print(f"{len(genage_gene_symbols)} GenAge genes selected: {genage_gene_symbols}")
+
+    # Step 2: Generate queries for OpenGenes using LLM
+    print("  Generating OpenGenes queries via LLM...")
+    opengenes_queries = generate_opengenes_seed_queries(bp_name, hallmark)
+    print(f"{len(opengenes_queries)}  OpenGenes queries: {opengenes_queries}")
+
+    # Build candidate list
+    candidates = []
+
+    # Add GenAge genes (lookup from cached GenAge data)
+    genage_lookup = _get_genage_lookup()
+    for symbol in genage_gene_symbols:
+        if symbol in genage_lookup:
+            rec = genage_lookup[symbol]
+            candidates.append(
+                {
+                    "symbol": symbol,
+                    "name": rec.get("name", ""),
+                    "source": "genage",
+                    "evidence": rec.get("why", ""),
+                }
+            )
+
+    # Query OpenGenes with each generated query
+    # Note: OpenGenes API requires comma-separated terms, not space-separated
+    # Convert "DNA sensing" -> "DNA, sensing" for better results
+    for query in opengenes_queries:
+        formatted_query = query.replace(" ", ", ")
+        opengenes_results = query_opengenes(query=formatted_query, max_results=opengenes_seed_results_per_query)
+        print(f"    OpenGenes '{formatted_query}': {len(opengenes_results)} results")
+        for rec in opengenes_results:
+            symbol = rec.get("symbol")
+            candidates.append(
+                {
+                    "symbol": symbol,
+                    "name": rec.get("name", ""),
+                    "source": "opengenes",
+                    "aging_mechanisms": rec.get("agingMechanisms", []),
+                    "functional_clusters": rec.get("functionalClusters", []),
+                    "protein_classes": rec.get("proteinClasses", []),
+                    "evidence_causes": rec.get("commentCause", []),
+                    "query_used": query,
+                }
+            )
+
+    print(f"\n  Raw candidates: {len(candidates)}")
+    print(f"    - GenAge: {len([c for c in candidates if c['source'] == 'genage'])}")
+    print(f"    - OpenGenes: {len([c for c in candidates if c['source'] == 'opengenes'])}")
+
+    # Normalize and deduplicate candidates
+    candidates = normalize_seed_candidates(candidates)
+
+    # Count by source type
+    genage_only = len([c for c in candidates if c['source'] == 'genage'])
+    opengenes_only = len([c for c in candidates if c['source'] == 'opengenes'])
+    both = len([c for c in candidates if c['source'] == 'genage, opengenes'])
+
+    print(f"\n  Normalized: {len(candidates)} unique genes")
+    print(f"    - GenAge only: {genage_only}")
+    print(f"    - OpenGenes only: {opengenes_only}")
+    print(f"    - Both: {both}")
+
+    # Summarize evidence via LLM
+    print(f"\n  Summarizing evidence...")
+    candidates = summarize_seed_evidence(candidates, bp_name, hallmark)
+    print(f"  Evidence summarization complete")
+    print(f"{'='*60}\n")
+
+    # Persist seed genes to disk
+    bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed
+    output_dir = Path(cfg.get("output_dir", "outputs"))
+    seed_file = output_dir / hallmark / f"bp{bp_rank}_seed_genes.json"
+    seed_file.parent.mkdir(parents=True, exist_ok=True)
+    with seed_file.open("w") as f:
+        json.dump(candidates, f, indent=2)
+    print(f"  Saved seed genes to: {seed_file}")
+
+    # Persist seeding queries to disk
+    queries_file = output_dir / hallmark / f"bp{bp_rank}_seeding_queries.json"
+    with queries_file.open("w") as f:
+        json.dump({"opengenes_queries": opengenes_queries}, f, indent=2)
+    print(f"  Saved seeding queries to: {queries_file}")
+
+    # Store in scratchpad as structured JSON
+    research_data = {
+        "initial_database_genes": candidates,
+        "opengenes_seeding_queries": opengenes_queries,
+        "research_findings": [],
+    }
+
+    # Initialize state_of_knowledge from seeds
+    candidate_genes = [c.get("symbol") for c in candidates if c.get("symbol")]
+    citations = []
+    for c in candidates:
+        source = c.get("source", "")
+        symbol = c.get("symbol", "")
+        if "genage" in source:
+            citations.append(f"genage:{symbol}")
+        if "opengenes" in source:
+            citations.append(f"opengenes:{symbol}")
+
+    state_of_knowledge = {
+        "candidate_genes": candidate_genes,
+        "citations": list(set(citations)),
+        "summary": "",  # Populated after first research iteration
+    }
+
+    # Initialize gene_evidence from seeds
+    gene_evidence = {}
+    for c in candidates:
+        symbol = c.get("symbol", "")
+        if not symbol:
+            continue
+        source = c.get("source", "").lower()
+        gene_evidence[symbol] = {
+            "opengenes": "opengenes" in source,
+            "genage": "genage" in source,
+            "evidence_notes": [],  # Populated during research iterations
+            "citations": [f"{source}:{symbol}"],
+        }
+
+    # Persist gene_evidence to disk
+    evidence_file = output_dir / hallmark / f"bp{bp_rank}_gene_evidence.json"
+    with evidence_file.open("w") as f:
+        json.dump(gene_evidence, f, indent=2)
+    print(f"  Saved gene evidence to: {evidence_file}")
+
+    # Persist state_of_knowledge to disk
+    sok_file = output_dir / hallmark / f"bp{bp_rank}_state_of_knowledge.json"
+    with sok_file.open("w") as f:
+        json.dump(state_of_knowledge, f, indent=2)
+    print(f"  Saved state_of_knowledge to: {sok_file}")
+
+    return {
+        "research_scratchpad": json.dumps(research_data, default=str),
+        "phase2_research_iteration": 1,
+        "state_of_knowledge": json.dumps(state_of_knowledge),
+        "gene_evidence": gene_evidence,
+    }
 
 
 def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
@@ -85,136 +261,48 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     opengenes_seed_results_per_query = p2.get("opengenes_seed_results_per_query", 15)
     vector_db_top_k = p2.get("phase2_vector_db_top_k", 10)
     pubmed_retmax = p2.get("phase2_pubmed_retmax", 10)
+    summarize_max_tokens = p2.get("phase2_summarize_max_tokens", 100000)
+    min_actions_per_iteration = p2.get("min_actions_per_iteration", 2)
+    max_actions_per_iteration = p2.get("max_actions_per_iteration", 4)
 
     # Get current iteration
     current_iteration = state.get("phase2_research_iteration", 0)
+    print(f"\n=== Phase 2 Research Iteration {current_iteration}/{max_iterations} ===")
 
-    # Initialize scratchpad if first iteration
+    # Iteration 0: Seeding
     if current_iteration == 0:
-        print(f"\n{'='*60}")
-        print(f"SEEDING: {bp_name}")
-        print(f"{'='*60}")
-
-        # Load GenAge CSV data
-        genage_csv_data = _load_genage_csv()
-
-        # Step 1: Select genes directly from GenAge using LLM
-        print("  Selecting GenAge genes via LLM...")
-        genage_gene_symbols = select_genage_seed_genes(bp_name, hallmark, genage_csv_data)
-        print(f"{len(genage_gene_symbols)} GenAge genes selected: {genage_gene_symbols}")
-
-        # Step 2: Generate queries for OpenGenes using LLM
-        print("  Generating OpenGenes queries via LLM...")
-        opengenes_queries = generate_opengenes_seed_queries(bp_name, hallmark)
-        print(f"{len(opengenes_queries)}  OpenGenes queries: {opengenes_queries}")
-
-        # Build candidate list
-        candidates = []
-
-        # Add GenAge genes (lookup from cached GenAge data)
-        genage_lookup = _get_genage_lookup()
-        for symbol in genage_gene_symbols:
-            if symbol in genage_lookup:
-                rec = genage_lookup[symbol]
-                candidates.append(
-                    {
-                        "symbol": symbol,
-                        "name": rec.get("name", ""),
-                        "source": "genage",
-                        "evidence": rec.get("why", ""),
-                    }
-                )
-
-        # Query OpenGenes with each generated query
-        # Note: OpenGenes API requires comma-separated terms, not space-separated
-        # Convert "DNA sensing" -> "DNA, sensing" for better results
-
-        for query in opengenes_queries:
-            formatted_query = query.replace(" ", ", ")
-            opengenes_results = query_opengenes(query=formatted_query, max_results=opengenes_seed_results_per_query)
-            print(f"    OpenGenes '{formatted_query}': {len(opengenes_results)} results")
-            for rec in opengenes_results:
-                symbol = rec.get("symbol")
-                candidates.append(
-                    {
-                        "symbol": symbol,
-                        "name": rec.get("name", ""),
-                        "source": "opengenes",
-                        "aging_mechanisms": rec.get("agingMechanisms", []),
-                        "functional_clusters": rec.get("functionalClusters", []),
-                        "protein_classes": rec.get("proteinClasses", []),
-                        "evidence_causes": rec.get("commentCause", []),
-                        "query_used": query,
-                    }
-                )
-
-        print(f"\n  Raw candidates: {len(candidates)}")
-        print(f"    - GenAge: {len([c for c in candidates if c['source'] == 'genage'])}")
-        print(f"    - OpenGenes: {len([c for c in candidates if c['source'] == 'opengenes'])}")
-
-        # Normalize and deduplicate candidates
-        candidates = normalize_seed_candidates(candidates)
-
-        # Count by source type
-        genage_only = len([c for c in candidates if c['source'] == 'genage'])
-        opengenes_only = len([c for c in candidates if c['source'] == 'opengenes'])
-        both = len([c for c in candidates if c['source'] == 'genage, opengenes'])
-
-        print(f"\n  Normalized: {len(candidates)} unique genes")
-        print(f"    - GenAge only: {genage_only}")
-        print(f"    - OpenGenes only: {opengenes_only}")
-        print(f"    - Both: {both}")
-
-        # Summarize evidence via LLM
-        print(f"\n  Summarizing evidence...")
-        candidates = summarize_seed_evidence(candidates, bp_name, hallmark)
-        print(f"  Evidence summarization complete")
-        print(f"{'='*60}\n")
-
-        # Persist seed genes to disk
-        bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed
-        output_dir = Path(cfg.get("output_dir", "outputs"))
-        seed_file = output_dir / hallmark / f"bp{bp_rank}_seed_genes.json"
-        seed_file.parent.mkdir(parents=True, exist_ok=True)
-        with seed_file.open("w") as f:
-            json.dump(candidates, f, indent=2)
-        print(f"  Saved seed genes to: {seed_file}")
-
-        # Store in scratchpad as structured JSON
-        research_data = {
-            "initial_database_genes": candidates,
-            "research_findings": [],  # Accumulated findings from iterations
-        }
-
-        return {
-            "research_scratchpad": json.dumps(research_data, default=str),
-            "phase2_research_iteration": 1,
-        }
+        return phase2_seeding(state)
 
     # Load current research state
     try:
         research_data = json.loads(state.get("research_scratchpad", "{}"))
     except json.JSONDecodeError:
-        research_data = {"initial_database_genes": [], "research_findings": []}
+        research_data = {"initial_database_genes": [], "opengenes_seeding_queries": [], "research_findings": []}
 
-    set_trace()
-    # Add context management
-    context_updates = summarize_if_needed(state)
-    if context_updates:
-        state.update(context_updates)
+    # Load state_of_knowledge (compressed context for LLM)
+    try:
+        state_of_knowledge = json.loads(state.get("state_of_knowledge", "{}"))
+    except json.JSONDecodeError:
+        state_of_knowledge = {"candidate_genes": [], "citations": [], "summary": ""}
+
+    # Load gene_evidence (structured per-gene evidence accumulator)
+    gene_evidence = state.get("gene_evidence", {})
     
-    set_trace()
-
-    llm = get_llm()
-
+    # Add context management; summarize only if we have research findings 
+    # no need to compress structured seeding data 
+    # if research_data["research_findings"]:
+    #     context_updates = summarize_if_needed(state, max_tokens=summarize_max_tokens)
+    #     if context_updates:
+    #         state.update(context_updates)
+    
+    
     # Determine research phase based on iteration (dynamic boundaries)
     exploration_end = max(1, int(max_iterations * 0.3))
     rabbit_hole_end = max(exploration_end + 1, int(max_iterations * 0.6))
-
     if current_iteration <= exploration_end:
         phase = "exploration"
         guidance = (
-            "Cast a wide net. Query all 4 sources with broad terms. "
+            "Cast a wide net. Query all 3 sources with broad terms. "
             "Note what looks interesting."
         )
     elif current_iteration <= rabbit_hole_end:
@@ -233,225 +321,390 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             "Return only genes with score 5+."
         )
 
-    # Build context with structured summary if available
-    context_parts = []
-    if state.get("context_summary"):
-        try:
-            summary_data = json.loads(state["context_summary"])
-            top_candidates = summary_data.get("top_candidates", [])
-            iteration_state = summary_data.get("iteration_state", {})
-            gaps = summary_data.get("research_gaps", [])
-            high_value_findings = summary_data.get("high_value_findings", [])
-
-            top_cand_str = ", ".join([c["symbol"] for c in top_candidates[:10]])
-            total_findings = iteration_state.get("total_findings", "N/A")
-            gaps_str = ", ".join(gaps[:3]) if gaps else "None identified"
-            findings_json = json.dumps(high_value_findings[:10], indent=2)
-
-            context_str = f"""## Research Summary
-                            Top Candidates: {top_cand_str}
-                            Total Findings: {total_findings}
-                            Research Gaps: {gaps_str}
-
-                            ## High-Value Findings
-                            {findings_json}
-                            """
-            context_parts.append(context_str)
-        except json.JSONDecodeError:
-            # Fallback to raw summary text
-            context_parts.append(
-                f"## Previous Research Summary\n{state['context_summary']}"
-            )
-    else:
-        # No summarization needed - pass full unsummarized context
-        all_candidates = json.dumps(
-            [c["symbol"] for c in research_data.get("initial_database_genes", [])],
-            indent=2,
-        )
-        all_findings = json.dumps(research_data.get("research_findings", []), indent=2)
-        context_parts.append(f"## All Candidates\n{all_candidates}")
-        context_parts.append(f"## All Findings\n{all_findings}")
-    context_str = "\n".join(context_parts)
-
-    # Format system prompt for research loop iterations
-    system_prompt = PHASE2_RESEARCH_SYSTEM_PROMPT.format(
-        biological_process=bp_name,
-        hallmark_name=hallmark,
-        tool_descriptions=PHASE2_TOOL_DESCRIPTIONS,
+    # Build seed genes summary (genes + evidence from seeding)
+    seed_genes = research_data.get("initial_database_genes", [])
+    seed_genes_summary = json.dumps(
+        [{"symbol": g.get("symbol"), "evidence": g.get("evidence", "")} for g in seed_genes],
+        indent=2,
     )
 
-    # Format user prompt with current state and get decision
-    user_prompt = PHASE2_DECISION_USER_PROMPT.format(
-                            current_iteration=current_iteration,
-                            max_iterations=max_iterations,
-                            phase=phase.upper(),
-                            guidance=guidance,
-                            candidates_summary="",  # Not used - context_str has everything
-                            recent_findings=context_str,
-                            min_actions=min_actions_per_iteration,
-                            max_actions=max_actions_per_iteration,
-                        )
+    # ===== TWO-STEP RESEARCH DECISION PROCESS =====
 
-    # Get research decisions from LLM with structured output
+    # Step 1: Synthesize research priorities (free-form invoke)
+    print(f"Summarizing current state of knowledge..")
+    llm = get_llm()
+    synthesize_prompt = PHASE2_SYNTHESIZE_PROMPT.format(
+        biological_process=bp_name,
+        hallmark_name=hallmark,
+        current_iteration=current_iteration,
+        max_iterations=max_iterations,
+        phase=phase.upper(),
+        guidance=guidance,
+        candidate_genes=", ".join(state_of_knowledge.get("candidate_genes", [])),
+        citations=", ".join(state_of_knowledge.get("citations", [])),
+        summary=state_of_knowledge.get("summary", "No summary yet."),
+    )
+    research_priorities = llm.invoke(synthesize_prompt)
+
+    # Step 2: Decide tool calls (structured invoke)
     decision_schema = {
         "title": "research_decision",
         "type": "object",
         "properties": {
-            "actions": {
+            "opengenes_queries": {
+                "type": "array",
+                "minItems": 2,  # Seeding already done, use sparingly
+                "maxItems": 4,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["query", "reason"],
+                },
+            },
+            "pubmed_queries": {
                 "type": "array",
                 "minItems": min_actions_per_iteration,
                 "maxItems": max_actions_per_iteration,
                 "items": {
                     "type": "object",
                     "properties": {
-                        "source": {
-                            "type": "string",
-                            "enum": ["genage", "opengenes", "pubmed", "vector_db"],
-                        },
                         "query": {"type": "string"},
                         "reason": {"type": "string"},
                     },
-                    "required": ["source", "query"],
+                    "required": ["query", "reason"],
                 },
             },
-            "findings_notes": {"type": "array", "items": {"type": "string"}},
+            "vector_db_queries": {
+                "type": "array",
+                "minItems": min_actions_per_iteration,
+                "maxItems": max_actions_per_iteration,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["query", "reason"],
+                },
+            },
+            "findings_notes": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
         },
-        "required": ["actions", "findings_notes"],
+        "required": ["opengenes_queries", "pubmed_queries", "vector_db_queries", "findings_notes"],
     }
 
-    try:
-        decisions = llm.invoke_structured(
-            user_prompt, schema=decision_schema, system_prompt=system_prompt
-        )
-    except Exception:
-        decisions = {"actions": [], "findings_notes": []}
+    decision_prompt = PHASE2_DECIDE_PROMPT.format(
+        biological_process=bp_name,
+        hallmark_name=hallmark,
+        current_iteration=current_iteration,
+        max_iterations=max_iterations,
+        phase=phase.upper(),
+        guidance=guidance,
+        research_priorities=research_priorities,
+        min_opengenes=2,
+        max_opengenes=4,
+        min_pubmed=min_actions_per_iteration,
+        max_pubmed=max_actions_per_iteration,
+        min_vectordb=min_actions_per_iteration,
+        max_vectordb=max_actions_per_iteration,
+    )
+
+    print(f"Deciding on research tool calls..")
+    decisions = llm.invoke_structured(decision_prompt, schema=decision_schema)
+    findings_notes = decisions['findings_notes'] 
+    
+    # Build findings summary (from research iterations)
+    findings = research_data.get("research_findings", [])
+    if findings:
+        findings_summary = json.dumps(findings, indent=2)
+    else:
+        findings_summary = "No research findings yet."
+    
 
     # Execute the research actions
     new_findings = []
 
-    # Helper to truncate OpenGenes lists if max_opengenes_items > 0
-    def truncate_field(items):
-        if max_opengenes_items_per_field < 0:
-            return items
-        return items[:max_opengenes_items_per_field]
+    # Initialize summaries (may remain None if no findings)
+    opengenes_summary = None
+    pubmed_summary = None
+    vectordb_summary = None
 
-    for action in decisions.get("actions", []):
-        source = action.get("source")
+    # Process OpenGenes queries
+    print("Collecting and summarizing from opengenes..")
+    opengenes_findings = []
+    for action in decisions.get("opengenes_queries", []):
         query = action.get("query")
+        formatted_query = query.replace(" ", ", ")
+        results = query_opengenes(query=formatted_query, max_results=15)
+        for rec in results:
+            mechanisms = rec.get("agingMechanisms", [])
+            clusters = rec.get("functionalClusters", [])
+            proteins = rec.get("proteinClasses", [])
+            causes = rec.get("commentCause", [])
+            finding_text = f"OpenGenes - Mechanisms: {mechanisms}; Clusters: {clusters}; Proteins: {proteins}; Evidence: {causes}"
 
-        if source == "genage":
-            from aging_bd_agentic_system.tools import query_genage
-            results = query_genage(query=query, max_results=20)
+            finding = {
+                "source": "opengenes",
+                "gene": rec.get("symbol"),
+                "query": query,
+                "finding": finding_text,
+            }
+            new_findings.append(finding)
+            opengenes_findings.append(finding)
+
+    # Summarize OpenGenes results
+    if opengenes_findings:
+        summarizer_schema = {
+            "title": "tool_summary",
+            "type": "object",
+            "properties": {
+                "genes_mentioned": {"type": "array", "items": {"type": "string"}},
+                "key_findings": {"type": "array", "items": {"type": "string"}},
+                "citations": {"type": "array", "items": {"type": "string"}},
+                "relevance_to_process": {"type": "string"},
+            },
+            "required": ["genes_mentioned", "key_findings", "citations", "relevance_to_process"],
+        }
+        summarizer_system = PHASE2_TOOL_SUMMARIZER_PROMPT.format(
+            biological_process=bp_name,
+            hallmark_name=hallmark,
+            current_iteration=current_iteration,
+            max_iterations=max_iterations,
+            phase=phase.upper(),
+            candidate_genes=", ".join(state_of_knowledge.get("candidate_genes", [])),
+        )
+        user_prompt = f"""## Source: OpenGenes
+
+                        ## Raw Results ({len(opengenes_findings)} records)
+                        {json.dumps(opengenes_findings, indent=2)}
+
+                        Summarize these OpenGenes results. Extract genes, key findings about aging mechanisms, and citations (format: opengenes:GENE_SYMBOL)."""
+        
+        opengenes_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema)
+
+    # Process PubMed queries
+    print("Collecting and summarizing from PubMed queries..")
+    pubmed_findings = []
+    for action in decisions.get("pubmed_queries", []):
+        query = action.get("query")
+        results = query_pubmed(query=query, retmax=pubmed_retmax)
+        for rec in results:
+            pmid = rec.get("pmid", "pubmed")
+
+            finding = {
+                "source": f"pmid:{pmid}",
+                "gene": None,  # May or may not mention a gene
+                "query": query,
+                "finding": f"{rec.get('title', '')}: {rec.get('abstract', '')[:200]}",
+            }
+            new_findings.append(finding)
+            pubmed_findings.append(finding)
+
+    # Summarize PubMed results
+    if pubmed_findings:
+        user_prompt = f"""## Source: PubMed
+
+                        ## Raw Results ({len(pubmed_findings)} articles)
+                        {json.dumps(pubmed_findings, indent=2)}
+
+                        Summarize these PubMed results. Extract genes mentioned, key findings, and citations (format: pmid:12345678)."""
+        pubmed_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema)
+
+    # Process Vector DB queries (batched)
+    print("Collecting and summarizing from local literature corpus..")
+    vectordb_findings = []
+    vector_db_queries = [a.get("query") for a in decisions.get("vector_db_queries", [])]
+    if vector_db_queries:
+        batched_results = query_vector_db_batch(queries=vector_db_queries, top_k=vector_db_top_k)
+        for query, results in zip(vector_db_queries, batched_results):
             for rec in results:
-                new_findings.append(
-                    {
-                        "source": "genage",
-                        "gene": rec.get("symbol"),
-                        "query": query,
-                        "finding": f"Evidence: {rec.get('why', 'N/A')}",
-                    }
-                )
+                pmid = rec.get("pmid", "pubmed")
+                finding = {
+                    "source": f"pmid:{pmid}",
+                    "gene": None,
+                    "query": query,
+                    "finding": rec.get("text", "")[:300],
+                }
+                new_findings.append(finding)
+                vectordb_findings.append(finding)
 
-        elif source == "opengenes":
-            results = query_opengenes(query=query, max_results=20)
-            for rec in results:
-                mechanisms = truncate_field(rec.get("agingMechanisms", []))
-                clusters = truncate_field(rec.get("functionalClusters", []))
-                proteins = truncate_field(rec.get("proteinClasses", []))
-                causes = truncate_field(rec.get("commentCause", []))
-                finding_text = f"OpenGenes - Mechanisms: {mechanisms}; Clusters: {clusters}; Proteins: {proteins}; Evidence: {causes}"
+    # Summarize Vector DB results
+    if vectordb_findings:
+        user_prompt = f"""## Source: Vector DB (Literature Corpus)
 
-                new_findings.append(
-                    {
-                        "source": "opengenes",
-                        "gene": rec.get("symbol"),
-                        "query": query,
-                        "finding": finding_text,
-                    }
-                )
+                        ## Raw Results ({len(vectordb_findings)} passages)
+                        {json.dumps(vectordb_findings, indent=2)}
 
-        elif source == "pubmed":
-            results = query_pubmed(query=query, retmax=pubmed_retmax)
-            for rec in results:
-                new_findings.append(
-                    {
-                        "source": "pubmed",
-                        "gene": None,  # May or may not mention a gene
-                        "query": query,
-                        "finding": f"{rec.get('title', '')}: {rec.get('abstract', '')[:200]}",
-                    }
-                )
+                        Summarize these corpus results. Extract genes mentioned, mechanistic insights, and citations (format: pmid:XXXXX - use the pmid from the source field)."""
+        vectordb_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema)
 
-        elif source == "vector_db":
-            results = query_vector_db(query=query, top_k=vector_db_top_k)
-            for rec in results:
-                new_findings.append(
-                    {
-                        "source": "corpus",
-                        "gene": None,
-                        "query": query,
-                        "finding": rec.get("text", "")[:300],
-                    }
-                )
+    # ===== STEP 5: UPDATE STATE OF KNOWLEDGE =====
+    print("Synthesizing findings and updating state of knowledge...")
+
+    # Collect all genes mentioned this iteration
+    all_genes_mentioned = set()
+    for summary in [opengenes_summary, pubmed_summary, vectordb_summary]:
+        if summary:
+            all_genes_mentioned.update(summary.get("genes_mentioned", []))
+
+    # Filter gene_evidence to only relevant genes
+    gene_evidence_subset = {
+        gene: gene_evidence.get(gene, {"opengenes": False, "genage": False, "evidence_notes": "", "citations": []})
+        for gene in all_genes_mentioned
+    }
+
+    # Schema for state update
+    state_update_schema = {
+        "title": "state_update",
+        "type": "object",
+        "properties": {
+            "new_candidate_genes": {"type": "array", "items": {"type": "string"}},
+            "new_citations": {"type": "array", "items": {"type": "string"}},
+            "summary": {"type": "string"},
+            "gene_evidence_updates": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        "evidence_notes": {"type": "string"},
+                        "new_citations": {"type": "array", "items": {"type": "string"}},
+                        "sources_found": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["evidence_notes", "new_citations", "sources_found"],
+                },
+            },
+        },
+        "required": ["new_candidate_genes", "new_citations", "summary", "gene_evidence_updates"],
+    }
+    
+    # Build state update prompt
+    state_update_prompt = PHASE2_STATE_UPDATE_PROMPT.format(
+        biological_process=bp_name,
+        hallmark_name=hallmark,
+        current_iteration=current_iteration,
+        max_iterations=max_iterations,
+        phase=phase.upper(),
+        candidate_genes=", ".join(state_of_knowledge.get("candidate_genes", [])),
+        citations=", ".join(state_of_knowledge.get("citations", [])),
+        current_summary=state_of_knowledge.get("summary", "No summary yet."),
+        opengenes_summary=json.dumps(opengenes_summary, indent=2) if opengenes_summary else "{}",
+        pubmed_summary=json.dumps(pubmed_summary, indent=2) if pubmed_summary else "{}",
+        vectordb_summary=json.dumps(vectordb_summary, indent=2) if vectordb_summary else "{}",
+        gene_evidence_subset=json.dumps(gene_evidence_subset, indent=2),
+    )
+    
+    state_update = llm.invoke_structured(state_update_prompt, schema=state_update_schema)
+
+    # Apply updates to state_of_knowledge
+    new_genes = state_update.get("new_candidate_genes", [])
+    if new_genes:
+        state_of_knowledge["candidate_genes"].extend(new_genes)
+        state_of_knowledge["candidate_genes"] = list(set(state_of_knowledge["candidate_genes"]))
+
+    new_citations = state_update.get("new_citations", [])
+    if new_citations:
+        state_of_knowledge["citations"].extend(new_citations)
+        state_of_knowledge["citations"] = list(set(state_of_knowledge["citations"]))
+
+    state_of_knowledge["summary"] = state_update.get("summary", "")
+
+    # Apply updates to gene_evidence
+    gene_evidence_updates = state_update.get("gene_evidence_updates", {})
+    
+    for gene, update in gene_evidence_updates.items():
+        if not isinstance(update, dict):
+            print(f"  Warning: gene_evidence_updates[{gene}] is {type(update).__name__}, skipping")
+            continue
+
+        if gene not in gene_evidence:
+            gene_evidence[gene] = {"opengenes": False, "genage": False, "evidence_notes": "", "citations": []}
+
+        # Replace evidence_notes
+        gene_evidence[gene]["evidence_notes"] = update.get("evidence_notes", "")
+
+        # Append citations (dedupe)
+        gene_evidence[gene]["citations"].extend(update.get("new_citations", []))
+        gene_evidence[gene]["citations"] = list(set(gene_evidence[gene]["citations"]))
+
+        # OR the source flags
+        for src in update.get("sources_found", []):
+            src_lower = src.lower()
+            if src_lower in gene_evidence[gene]:
+                gene_evidence[gene][src_lower] = True
+
+    print(f"  Updated state: {len(new_genes)} new genes, {len(new_citations)} new citations")
+
 
     # Update research data
     research_data["research_findings"].extend(new_findings)
-    research_data["research_findings"].extend(decisions.get("findings_notes", []))
 
-    # If final iteration, synthesize and score genes
-    if current_iteration >= max_iterations:
-        # Use LLM-based comprehensive evidence aggregation (no truncation)
-        scoring_summary = summarize_for_scoring(research_data, bp_name)
+    # Log findings_notes for audit
+    for note in findings_notes:
+        formatted_note = f"  [it={current_iteration}] {note}"
+        print(formatted_note)
+        research_data.setdefault("reasoning_notes", []).append(formatted_note)
 
-        # System prompt with scoring instructions and rubric
-        system_prompt = PHASE2_SCORING_SYSTEM_PROMPT.format(
-            biological_process=bp_name, hallmark_name=hallmark
+    # Always increment iteration after research
+    #next_iteration = current_iteration + 1
+
+    # After final research iteration, score genes
+    if current_iteration == max_iterations:
+        
+        scoring_prompt = PHASE2_SCORING_SYSTEM_PROMPT.format(
+            biological_process=bp_name,
+            hallmark_name=hallmark,
+            research_summary=state_of_knowledge.get("summary", "No summary available."),
+            gene_evidence=json.dumps(gene_evidence, indent=2),
         )
-
-        # Schema for scored genes output
         scored_genes_schema = {
-            "title": "scored_genes",
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "gene_symbol": {"type": "string"},
-                    "score": {"type": "integer", "minimum": 5, "maximum": 10},
-                    "evidence_summary": {"type": "string"},
-                    "sources": {"type": "array", "items": {"type": "string"}},
+            "title": "scored_genes_response",
+            "type": "object",
+            "properties": {
+                "genes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "gene_symbol": {"type": "string"},
+                            "score": {"type": "integer", "minimum": 5, "maximum": 10},
+                            "evidence_summary": {"type": "string"},
+                            "sources": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["gene_symbol", "score", "evidence_summary", "sources"],
+                    },
                 },
-                "required": ["gene_symbol", "score", "evidence_summary", "sources"],
             },
+            "required": ["genes"],
         }
-
-        # User message with comprehensive evidence summary
-        user_context = f"""## Comprehensive Evidence Summary
-                        {json.dumps(scoring_summary, indent=2)}
-
-                        Based on the comprehensive evidence summary above, identify and score relevant genes.
-                        """
-
-        # Get scored genes using structured output
+        print("Finalize initial research. Score available genes...")
+        
         try:
-            scored_genes = llm.invoke_structured(
-                user_context, schema=scored_genes_schema, system_prompt=system_prompt
-            )
+            response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
+            scored_genes = response.get("genes", [])
         except Exception:
             scored_genes = []
-
-        # Add biological_process field
         for gene in scored_genes:
             gene["biological_process"] = bp_name
-
+        
         return {
             "genes_found": scored_genes,
-            "phase2_research_iteration": 0,  # Reset for next BP
+            "research_scratchpad": json.dumps(research_data, default=str),
+            "phase2_research_iteration": 0,
+            "state_of_knowledge": json.dumps(state_of_knowledge),
+            "gene_evidence": gene_evidence,
         }
 
-    # Not final iteration - continue research loop
+    # Continue research loop - persist state for next iteration
     return {
         "research_scratchpad": json.dumps(research_data, default=str),
-        "phase2_research_iteration": current_iteration + 1,
+        "phase2_research_iteration": current_iteration+1,
+        "state_of_knowledge": json.dumps(state_of_knowledge),
+        "gene_evidence": gene_evidence,
     }
 
 

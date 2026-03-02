@@ -46,6 +46,8 @@ class ResearchState(TypedDict):
     phase2_critic_iteration: int
     phase2_research_iteration: int
     phase2_eval: Dict[str, Any]
+    state_of_knowledge: Optional[str]  # JSON: {candidate_genes, citations, summary}
+    gene_evidence: Dict[str, Any]  # {gene_sym: {opengenes: bool, genage: bool, evidence_notes: [], citations: []}}
 
     # Phase 2 outputs (accumulated across all BPs)
     genes_found: Annotated[List[Dict[str, Any]], operator.add]

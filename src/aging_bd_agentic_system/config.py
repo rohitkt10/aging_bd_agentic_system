@@ -39,12 +39,24 @@ class Phase1Config:
 class Phase2Config:
     """Configuration for Phase 2: Gene Research."""
 
+    # Research loop
     max_research_iterations: int = 7
     max_refine_iterations: int = 3
+    min_actions_per_iteration: int = 2
+    max_actions_per_iteration: int = 4
+
+    # Seeding
     genage_seed_max_results: int = 50
     opengenes_seed_results_per_query: int = 15
+
+    # Tool limits
     phase2_vector_db_top_k: int = 10
     phase2_pubmed_retmax: int = 10
+    opengenes_results_per_query: int = 20
+    max_opengenes_items_per_field: int = 5  # Truncate long lists in OpenGenes results
+
+    # Context management
+    phase2_summarize_max_tokens: int = 100000
 
 
 @dataclass
@@ -187,6 +199,10 @@ class RunConfig:
             self.phase2.max_research_iterations = kwargs["max_research_iterations"]
         if kwargs.get("max_refine_iterations") is not None:
             self.phase2.max_refine_iterations = kwargs["max_refine_iterations"]
+        if kwargs.get("min_actions_per_iteration") is not None:
+            self.phase2.min_actions_per_iteration = kwargs["min_actions_per_iteration"]
+        if kwargs.get("max_actions_per_iteration") is not None:
+            self.phase2.max_actions_per_iteration = kwargs["max_actions_per_iteration"]
         if kwargs.get("genage_seed_max_results") is not None:
             self.phase2.genage_seed_max_results = kwargs["genage_seed_max_results"]
         if kwargs.get("opengenes_seed_results_per_query") is not None:
@@ -195,5 +211,11 @@ class RunConfig:
             self.phase2.phase2_vector_db_top_k = kwargs["phase2_vector_db_top_k"]
         if kwargs.get("phase2_pubmed_retmax") is not None:
             self.phase2.phase2_pubmed_retmax = kwargs["phase2_pubmed_retmax"]
+        if kwargs.get("opengenes_results_per_query") is not None:
+            self.phase2.opengenes_results_per_query = kwargs["opengenes_results_per_query"]
+        if kwargs.get("max_opengenes_items_per_field") is not None:
+            self.phase2.max_opengenes_items_per_field = kwargs["max_opengenes_items_per_field"]
+        if kwargs.get("phase2_summarize_max_tokens") is not None:
+            self.phase2.phase2_summarize_max_tokens = kwargs["phase2_summarize_max_tokens"]
 
         return self

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any
-
+from pdb import set_trace
 from aging_bd_agentic_system.llm import get_llm
 from aging_bd_agentic_system.prompts.phase2_prompts import (
     PHASE2_ACTIONABILITY_SUMMARY_PROMPT,
@@ -328,7 +328,7 @@ def summarize_for_actionability(research_data: dict, state: dict) -> dict:
     user_prompt = PHASE2_ACTIONABILITY_SUMMARY_PROMPT.format(
         research_data_json=json.dumps(research_data, indent=2, default=str)
     )
-
+    set_trace()
     try:
         summary = llm.invoke_structured(
             user_prompt,
@@ -409,7 +409,7 @@ def summarize_if_needed(
     )
 
     token_count = estimate_tokens(blob)
-
+    
     # Check if we need to summarize
     if token_count <= max_tokens:
         return {}
@@ -426,6 +426,7 @@ def summarize_if_needed(
 
     # Use LLM-based actionability summarization
     summary_data = summarize_for_actionability(research_data, state)
+    set_trace()
 
     # Return state updates with structured JSON summary
     return {

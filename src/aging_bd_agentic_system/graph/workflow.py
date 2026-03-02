@@ -136,6 +136,34 @@ def build_phase2_graph() -> StateGraph:
     return builder.compile()
 
 
+def phase2_research_only_route(state: dict[str, Any]) -> str:
+    """Route for research-only graph: continue loop or end."""
+    iteration = state.get("phase2_research_iteration", 0)
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase2", {}).get("max_research_iterations", 7)
+
+    if iteration > 0 and iteration <= max_iterations:
+        return "phase2_research"
+    return END
+
+
+def build_phase2_research_only_graph() -> StateGraph:
+    """Build Phase 2 graph that stops after initial research (no critic/refine/go_mapping)."""
+    builder: StateGraph = StateGraph(ResearchState)
+    builder.add_node("select_bp", select_bp)
+    builder.add_node("phase2_research", phase2_research)
+
+    builder.set_entry_point("select_bp")
+    builder.add_edge("select_bp", "phase2_research")
+    builder.add_conditional_edges(
+        "phase2_research",
+        phase2_research_only_route,
+        {"phase2_research": "phase2_research", END: END},
+    )
+
+    return builder.compile()
+
+
 def build_workflow() -> StateGraph:
     """Build the top-level workflow graph."""
     builder: StateGraph = StateGraph(ResearchState)

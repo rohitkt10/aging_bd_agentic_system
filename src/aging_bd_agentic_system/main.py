@@ -100,6 +100,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--phase2-pubmed-retmax", type=int, help="Phase 2: PubMed results per query"
     )
+    parser.add_argument(
+        "--phase2-summarize-max-tokens", type=int, help="Phase 2: Max tokens before summarization"
+    )
 
     return parser.parse_args()
 
@@ -148,6 +151,7 @@ def _print_config(config: RunConfig) -> None:
     print(f"  opengenes_seed_results_per_query: {p2.get('opengenes_seed_results_per_query')}")
     print(f"  phase2_vector_db_top_k: {p2.get('phase2_vector_db_top_k')}")
     print(f"  phase2_pubmed_retmax: {p2.get('phase2_pubmed_retmax')}")
+    print(f"  phase2_summarize_max_tokens: {p2.get('phase2_summarize_max_tokens')}")
 
     print("\n" + "=" * 60 + "\n")
 
@@ -214,6 +218,7 @@ def main() -> None:
         opengenes_seed_results_per_query=args.opengenes_seed_results_per_query,
         phase2_vector_db_top_k=args.phase2_vector_db_top_k,
         phase2_pubmed_retmax=args.phase2_pubmed_retmax,
+        phase2_summarize_max_tokens=args.phase2_summarize_max_tokens,
     )
 
     # Validate hallmark is set

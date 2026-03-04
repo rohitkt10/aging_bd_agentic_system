@@ -18,10 +18,23 @@ llm:
   # Provider: "vertex" or "openai"
   provider: vertex
 
-  # Model name (provider-specific)
-  # Vertex: gemini-2.5-pro, gemini-2.0-flash, gemini-1.5-pro
-  # OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo
+  # Two-tier model system:
+  # - model: Base fallback for both tiers (used if model_low/model_high not set)
+  # - model_low: Cheaper/faster model for most tasks (overrides model if set)
+  # - model_high: More capable model for complex tasks (defaults to model_low if not set)
+  #
+  # Resolution: model_low = model_low ?? model
+  #             model_high = model_high ?? model_low
+  #
+  # Examples:
+  #   model: gpt-5-nano                    → low=gpt-5-nano, high=gpt-5-nano
+  #   model: gpt-5-nano, model_high: gpt-5.2-pro → low=gpt-5-nano, high=gpt-5.2-pro
+  #   model_low: gpt-5-nano, model_high: gpt-5.2-pro → low=gpt-5-nano, high=gpt-5.2-pro
+
   model: gemini-2.5-pro
+  model_low: null   # If null, uses model
+  model_high: null  # If null, uses model_low
+  # model_high: gemini-2.5-pro  # Uncomment to use different high-tier model
 
   # Generation parameters
   temperature: 0.7
@@ -76,3 +89,9 @@ phase2:
 
   # Context management
   phase2_summarize_max_tokens: 100000  # Max tokens before context summarization
+
+  # Critic-refine loop settings
+  max_critic_iterations: 2  # Maximum critic-refine cycles
+  refine_opengenes_max_results: 15  # OpenGenes results per query during refinement
+  refine_pubmed_max_results: 10  # PubMed results per query during refinement
+  refine_vector_db_top_k: 10  # Vector DB results per query during refinement

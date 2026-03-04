@@ -484,8 +484,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
                         {json.dumps(opengenes_findings, indent=2)}
 
                         Summarize these OpenGenes results. Extract genes, key findings about aging mechanisms, and citations (format: opengenes:GENE_SYMBOL)."""
-        
-        opengenes_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema)
+
+        opengenes_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
 
     # Process PubMed queries
     print("Collecting and summarizing from PubMed queries..")
@@ -494,13 +494,15 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         query = action.get("query")
         results = query_pubmed(query=query, retmax=pubmed_retmax)
         for rec in results:
+            if rec.get("abstract", None) is None:
+                continue
             pmid = rec.get("pmid", "pubmed")
 
             finding = {
                 "source": f"pmid:{pmid}",
                 "gene": None,  # May or may not mention a gene
                 "query": query,
-                "finding": f"{rec.get('title', '')}: {rec.get('abstract', '')[:200]}",
+                "finding": f"{rec.get('title', '')}: {rec.get('abstract', '')}",
             }
             new_findings.append(finding)
             pubmed_findings.append(finding)
@@ -513,7 +515,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
                         {json.dumps(pubmed_findings, indent=2)}
 
                         Summarize these PubMed results. Extract genes mentioned, key findings, and citations (format: pmid:12345678)."""
-        pubmed_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema)
+        pubmed_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
 
     # Process Vector DB queries (batched)
     print("Collecting and summarizing from local literature corpus..")
@@ -528,7 +530,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
                     "source": f"pmid:{pmid}",
                     "gene": None,
                     "query": query,
-                    "finding": rec.get("text", "")[:300],
+                    "finding": rec.get("text", ""),
                 }
                 new_findings.append(finding)
                 vectordb_findings.append(finding)
@@ -541,7 +543,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
                         {json.dumps(vectordb_findings, indent=2)}
 
                         Summarize these corpus results. Extract genes mentioned, mechanistic insights, and citations (format: pmid:XXXXX - use the pmid from the source field)."""
-        vectordb_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema)
+        vectordb_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
 
     # ===== STEP 5: UPDATE STATE OF KNOWLEDGE =====
     print("Synthesizing findings and updating state of knowledge...")
@@ -682,7 +684,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             "required": ["genes"],
         }
         print("Finalize initial research. Score available genes...")
-        
+        set_trace()
         try:
             response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
             scored_genes = response.get("genes", [])
@@ -707,164 +709,6 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         "gene_evidence": gene_evidence,
     }
 
-
-def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
-    """
-    Use LLM to evaluate gene evidence coverage for the current BP.
-
-    LLM judges:
-    - Are there enough genes?
-    - Is evidence strong?
-    - Are genes relevant to the BP?
-    """
-    bp_name = state.get("current_bp_name", "")
-    min_genes_expected = 20  # Fixed threshold
-
-    # Get genes for this BP only
-    all_genes = state.get("genes_found", [])
-    bp_genes = [g for g in all_genes if g.get("biological_process") == bp_name]
-
-    if not bp_genes:
-        return {
-            "phase2_eval": {
-                "grade": "fail",
-                "comment": f"No genes found for {bp_name}",
-                "follow_up_queries": [f"{bp_name} genes aging mechanisms"],
-                "min_genes_expected": min_genes_expected,
-            }
-        }
-
-    # User message contains the gene data
-    user_context = json.dumps(bp_genes, indent=2)
-
-    # Format system prompt
-    system_prompt = PHASE2_CRITIQUE_SYSTEM_PROMPT.format(
-        biological_process=bp_name,
-        genes_json="{GENES_JSON}",  # Placeholder
-    )
-
-    # Remove the genes_json from system prompt since it's now in user message
-    system_prompt = system_prompt.replace(
-        "{genes_json}", "See the genes in the user message."
-    )
-
-    llm = get_llm()
-
-    try:
-        schema = {
-            "title": "phase2_evaluation",
-            "type": "object",
-            "properties": {
-                "grade": {"type": "string", "enum": ["pass", "fail"]},
-                "comment": {"type": "string"},
-                "follow_up_queries": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["grade", "comment", "follow_up_queries"],
-        }
-
-        eval_result = llm.invoke_structured(
-            user_context, schema=schema, system_prompt=system_prompt
-        )
-
-    except Exception:
-        # Fallback: simple rule-based evaluation
-        gene_count = len(bp_genes)
-        eval_result = {
-            "grade": "pass" if gene_count >= min_genes_expected else "fail",
-            "comment": f"Found {gene_count} genes (expected {min_genes_expected}+).",
-            "follow_up_queries": [f"{bp_name} additional genes"]
-            if gene_count < min_genes_expected
-            else [],
-        }
-
-    eval_result["min_genes_expected"] = min_genes_expected
-    return {"phase2_eval": eval_result}
-
-
-def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
-    """
-    Run follow-up queries when Phase 2 critique fails.
-    """
-    # Fixed refinement parameters
-    max_follow_up_queries = 2
-    refine_vector_db_results = 5
-    refine_pubmed_results = 3
-    max_genes_per_query = 5
-
-    eval_data = state.get("phase2_eval", {})
-    follow_up = eval_data.get("follow_up_queries", [])
-    iteration = state.get("phase2_critic_iteration", 0) + 1
-
-    bp_name = state.get("current_bp_name", "")
-    updates: dict[str, Any] = {"phase2_critic_iteration": iteration}
-
-    # Simple refinement: query tools and extract genes using LLM
-    for query in follow_up[:max_follow_up_queries]:
-        # Use the query to find more genes
-        vector_results = query_vector_db(query=query, top_k=refine_vector_db_results)
-        pubmed_results = query_pubmed(query=query, retmax=refine_pubmed_results)
-
-        # Collect text for LLM extraction
-        extraction_context = []
-        for vec in vector_results:
-            extraction_context.append(f"Corpus: {vec.get('text', '')[:500]}")
-
-        for pub in pubmed_results:
-            title = pub.get("title", "")
-            abstract = pub.get("abstract", "")
-            extraction_context.append(f"PubMed: {title}\n{abstract[:400]}")
-
-        if not extraction_context:
-            continue
-
-        # Use LLM to extract actual gene symbols
-        llm = get_llm()
-
-        extraction_prompt = f"""## Text from Literature Search
-
-        Query: {query}
-
-        {" ".join(extraction_context)}
-
-        ## Task
-        Extract gene symbols mentioned in the text above that are relevant to: {bp_name}
-
-        Return ONLY a JSON array of gene symbols (e.g., ["TP53", "FOXO3"]).
-        """
-
-        extraction_schema = {
-            "title": "gene_symbols",
-            "type": "array",
-            "items": {"type": "string"},
-        }
-
-        try:
-            extracted_genes = llm.invoke_structured(
-                extraction_prompt,
-                schema=extraction_schema,
-                system_prompt="You are a gene symbol extractor. Return only standard gene symbols.",
-            )
-
-            # Create gene entries
-            new_genes = [
-                {
-                    "gene_symbol": gene,
-                    "score": 6,
-                    "biological_process": bp_name,
-                    "evidence_summary": f"Found via follow-up query: {query}",
-                    "sources": ["refinement"],
-                }
-                for gene in extracted_genes[:max_genes_per_query]
-            ]
-
-            if new_genes:
-                updates["genes_found"] = new_genes
-
-        except Exception:
-            # Fallback: skip gene extraction on failure
-            pass
-
-    return updates
 
 
 def map_go_terms(state: dict[str, Any]) -> dict[str, Any]:

@@ -16,7 +16,12 @@ phase1_only: false  # Run both phases for full smoke test
 
 llm:
   provider: openai
+
+  # Two-tier model system (both default to model for smoke tests)
   model: gpt-4o-mini
+  model_low: null   # If null, uses model
+  model_high: null  # If null, uses model_low
+
   temperature: 0.7
   max_tokens: null
   vertex_location: us-central1
@@ -58,3 +63,9 @@ phase2:
 
   # Context management
   phase2_summarize_max_tokens: 50000
+
+  # Critic-refine loop settings (smoke test: reduced)
+  max_critic_iterations: 1
+  refine_opengenes_max_results: 5
+  refine_pubmed_max_results: 5
+  refine_vector_db_top_k: 5

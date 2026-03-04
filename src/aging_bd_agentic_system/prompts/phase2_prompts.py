@@ -189,9 +189,10 @@ Search PubMed for recent literature.
 ### 3. query_vector_db
 Search custom literature corpus for mechanistic insights.
 - **Purpose**: Find detailed mechanistic context from curated literature
-- **Query accepts**: Biological concepts, processes, or phrases (e.g., "autophagy", "DNA methylation", "mitochondrial biogenesis")
+- **Query accepts**: Natural questions or fleshed-out concepts (e.g., "How does cGAS-STING activation contribute to inflammaging?", "Evidence linking mitochondrial DNA leakage to cytosolic DNA sensing")
 - **Returns**: Relevant text passages with sources
 - **Best for**: Mechanistic explanations, broad biological concepts, pathway context
+- **Note**: Uses semantic search - prefer full questions or detailed concepts over short keywords
 """
 
 # ===== PHASE 2 RESEARCH PROMPTS =====
@@ -314,14 +315,14 @@ Search PubMed for recent literature.
 ### 3. query_vector_db
 Search custom literature corpus for mechanistic insights.
 - **Purpose**: Find detailed mechanistic context from curated literature
-- **Accepts**: Biological concepts or phrases (e.g., "autophagy", "cGAS-STING pathway")
+- **Accepts**: Natural questions or fleshed-out concepts (e.g., "How does cGAS-STING activation contribute to inflammaging?")
 - **Returns**: Relevant text passages with sources
 - **Best for**: Mechanistic explanations, pathway context, broad concepts
 
 **Query guidelines**:
-- Use concept terms: "cytosolic DNA sensing", "inflamm-aging"
-- Can use phrases: "cGAS-STING activation"
-- Focus on mechanisms, not gene names
+- Use natural questions: "What is the role of cytosolic DNA sensing in aging?"
+- Or detailed concepts: "Evidence linking mitochondrial DNA leakage to inflammaging"
+- Avoid short keywords - semantic search works best with context
 
 ## Your Task
 

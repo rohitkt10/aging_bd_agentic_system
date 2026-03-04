@@ -5,12 +5,25 @@ Smoke test for Phase 2 research starting from saved seed genes.
 Loads seed genes from disk and continues from iteration 1 onwards.
 Skips the seeding step (iteration 0).
 
+Output structure:
+    outputs/{hallmark}/bp{rank}/
+        seed_genes.json           # Copy of seed genes
+        seeding_queries.json      # Copy of seeding queries
+        gene_evidence.json        # Final gene evidence
+        state_of_knowledge.json   # Final state of knowledge
+        research_scratchpad.json  # Final research data
+        scored_genes.tsv          # Scored genes output
+        tool_call_history.json    # All tool calls made
+        reasoning_trace.json      # LLM reasoning traces
+        warnings.json             # Any warnings
+        full_result.json          # Complete result state
+
 Usage:
     python scripts/phase2_research_from_seed_smoketest.py --hallmark "genomic instability" --bp-rank 1
     python scripts/phase2_research_from_seed_smoketest.py --hallmark "genomic instability" --bp-rank 1 --max-iterations 3
 
 Requires:
-    - Seed genes file: outputs/{hallmark}/bp{rank}_seed_genes.json
+    - Seed genes file: outputs/{hallmark}/bp{rank}_seed_genes.json (or bp{rank}/seed_genes.json)
     - Processes file: outputs/{hallmark}/processes.tsv
 """
 
@@ -21,8 +34,8 @@ import csv
 import json
 import sys
 from pathlib import Path
-from pdb import set_trace
 from dotenv import load_dotenv
+from pdb import set_trace
 
 # Load .env from project root
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -59,19 +72,82 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_seed_genes(output_dir: Path, hallmark: str, bp_rank: int) -> list[dict]:
-    """Load saved seed genes from disk."""
-    seed_file = output_dir / hallmark / f"bp{bp_rank}_seed_genes.json"
-    if not seed_file.exists():
-        raise FileNotFoundError(f"Seed file not found: {seed_file}")
+def load_seed_genes(hallmark_dir: Path, bp_dir: Path) -> list[dict]:
+    """Load saved seed genes - check new location first, then legacy."""
+    # New location
+    seed_file = bp_dir / "seed_genes.json"
+    if seed_file.exists():
+        with seed_file.open("r") as f:
+            return json.load(f)
 
-    with seed_file.open("r") as f:
-        return json.load(f)
+    # Legacy location
+    legacy_file = hallmark_dir / f"bp{bp_dir.name.replace('bp', '')}_seed_genes.json"
+    if legacy_file.exists():
+        with legacy_file.open("r") as f:
+            return json.load(f)
+
+    raise FileNotFoundError(f"Seed file not found in {seed_file} or {legacy_file}")
 
 
-def load_bp_name(output_dir: Path, hallmark: str, bp_rank: int) -> str:
+def load_seeding_queries(hallmark_dir: Path, bp_dir: Path) -> list[dict]:
+    """Load seeding queries - check new location first, then legacy."""
+    # New location
+    queries_file = bp_dir / "seeding_queries.json"
+    if queries_file.exists():
+        with queries_file.open("r") as f:
+            data = json.load(f)
+            return data.get("opengenes_queries", [])
+
+    # Legacy location
+    bp_rank = bp_dir.name.replace("bp", "")
+    legacy_file = hallmark_dir / f"bp{bp_rank}_seeding_queries.json"
+    if legacy_file.exists():
+        with legacy_file.open("r") as f:
+            data = json.load(f)
+            return data.get("opengenes_queries", [])
+
+    return []
+
+
+def load_gene_evidence(hallmark_dir: Path, bp_dir: Path) -> dict:
+    """Load gene evidence - check new location first, then legacy."""
+    # New location
+    evidence_file = bp_dir / "gene_evidence.json"
+    if evidence_file.exists():
+        with evidence_file.open("r") as f:
+            return json.load(f)
+
+    # Legacy location
+    bp_rank = bp_dir.name.replace("bp", "")
+    legacy_file = hallmark_dir / f"bp{bp_rank}_gene_evidence.json"
+    if legacy_file.exists():
+        with legacy_file.open("r") as f:
+            return json.load(f)
+
+    return {}
+
+
+def load_state_of_knowledge(hallmark_dir: Path, bp_dir: Path) -> dict:
+    """Load state of knowledge - check new location first, then legacy."""
+    # New location
+    sok_file = bp_dir / "state_of_knowledge.json"
+    if sok_file.exists():
+        with sok_file.open("r") as f:
+            return json.load(f)
+
+    # Legacy location
+    bp_rank = bp_dir.name.replace("bp", "")
+    legacy_file = hallmark_dir / f"bp{bp_rank}_state_of_knowledge.json"
+    if legacy_file.exists():
+        with legacy_file.open("r") as f:
+            return json.load(f)
+
+    return {"candidate_genes": [], "citations": [], "summary": ""}
+
+
+def load_bp_name(hallmark_dir: Path, bp_rank: int) -> str:
     """Load BP name from processes.tsv."""
-    processes_file = output_dir / hallmark / "processes.tsv"
+    processes_file = hallmark_dir / "processes.tsv"
     if not processes_file.exists():
         raise FileNotFoundError(f"Processes file not found: {processes_file}")
 
@@ -84,33 +160,51 @@ def load_bp_name(output_dir: Path, hallmark: str, bp_rank: int) -> str:
     raise ValueError(f"BP rank {bp_rank} not found in {processes_file}")
 
 
+def save_json(data: any, path: Path) -> None:
+    """Save data as JSON with indent."""
+    with path.open("w") as f:
+        json.dump(data, f, indent=2, default=str)
+
+
 def main() -> int:
     args = parse_args()
     output_dir = Path(args.output_dir)
+    hallmark_dir = output_dir / args.hallmark
+    bp_dir = hallmark_dir / f"bp{args.bp_rank}"
+
+    # Create BP-specific output directory
+    bp_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*60}")
     print(f"PHASE 2 SMOKE TEST (FROM SAVED SEED)")
     print(f"{'='*60}")
     print(f"Hallmark: {args.hallmark}")
     print(f"BP Rank: {args.bp_rank}")
+    print(f"Output dir: {bp_dir}")
 
     # Load saved data
     print("\nLoading saved data...")
     try:
-        seed_genes = load_seed_genes(output_dir, args.hallmark, args.bp_rank)
-        bp_name = load_bp_name(output_dir, args.hallmark, args.bp_rank)
+        seed_genes = load_seed_genes(hallmark_dir, bp_dir)
+        bp_name = load_bp_name(hallmark_dir, args.bp_rank)
+        opengenes_seeding_queries = load_seeding_queries(hallmark_dir, bp_dir)
+        gene_evidence = load_gene_evidence(hallmark_dir, bp_dir)
+        state_of_knowledge = load_state_of_knowledge(hallmark_dir, bp_dir)
     except (FileNotFoundError, ValueError) as e:
         print(f"ERROR: {e}")
         return 1
 
     print(f"BP Name: {bp_name}")
     print(f"Loaded {len(seed_genes)} seed genes")
+    print(f"Loaded {len(opengenes_seeding_queries)} seeding queries")
+    print(f"Loaded gene_evidence: {len(gene_evidence)} genes")
+    print(f"Loaded state_of_knowledge: {len(state_of_knowledge.get('candidate_genes', []))} candidates")
 
     # Configure LLM
     llm_config = LLMConfig(
         provider="openai",
         model="gpt-5-nano",
-        temperature=0.7,
+        temperature=0.5,
     )
 
     # Build RunConfig
@@ -131,20 +225,8 @@ def main() -> int:
     config.phase2.min_actions_per_iteration = 4
     config.phase2.max_actions_per_iteration = 6
 
-
     # Initialize LLM
     init_llm(config.llm)
-
-    # Load seeding queries
-    queries_file = output_dir / args.hallmark / f"bp{args.bp_rank}_seeding_queries.json"
-    if queries_file.exists():
-        with queries_file.open("r") as f:
-            queries_data = json.load(f)
-            opengenes_seeding_queries = queries_data.get("opengenes_queries", [])
-        print(f"Loaded {len(opengenes_seeding_queries)} seeding queries")
-    else:
-        print(f"Warning: Seeding queries file not found: {queries_file}")
-        opengenes_seeding_queries = []
 
     # Build research_data from saved seed genes
     research_data = {
@@ -152,27 +234,6 @@ def main() -> int:
         "opengenes_seeding_queries": opengenes_seeding_queries,
         "research_findings": [],
     }
-
-    # Load gene_evidence from disk
-    evidence_file = output_dir / args.hallmark / f"bp{args.bp_rank}_gene_evidence.json"
-    if evidence_file.exists():
-        with evidence_file.open("r") as f:
-            gene_evidence = json.load(f)
-        print(f"Loaded gene_evidence: {len(gene_evidence)} genes")
-    else:
-        print(f"Warning: gene_evidence file not found: {evidence_file}")
-        gene_evidence = {}
-
-
-    # Load state_of_knowledge from disk
-    sok_file = output_dir / args.hallmark / f"bp{args.bp_rank}_state_of_knowledge.json"
-    if sok_file.exists():
-        with sok_file.open("r") as f:
-            state_of_knowledge = json.load(f)
-        print(f"Loaded state_of_knowledge: {len(state_of_knowledge.get('candidate_genes', []))} candidates")
-    else:
-        print(f"Warning: state_of_knowledge file not found: {sok_file}")
-        state_of_knowledge = {"candidate_genes": [], "citations": [], "summary": ""}
 
     # Build initial state for Phase 2 (starting at iteration 1)
     initial_state = {
@@ -202,28 +263,54 @@ def main() -> int:
 
     graph = build_phase2_research_only_graph()
     result = graph.invoke(initial_state)
-
     set_trace()
 
-    # Summary
+    # Extract results
     genes = result.get("genes_found", [])
     go_terms = result.get("go_terms_found", [])
+    tool_calls = result.get("tool_call_history", [])
+    reasoning = result.get("reasoning_trace", [])
+    warnings = result.get("warnings", [])
+    final_scratchpad = result.get("research_scratchpad", "{}")
+    final_sok = result.get("state_of_knowledge", "{}")
+    final_evidence = result.get("gene_evidence", {})
+
+    # Save all outputs to BP-specific directory
+    print(f"\nSaving outputs to {bp_dir}...")
+
+    # Copy/save input files (for reproducibility)
+    save_json(seed_genes, bp_dir / "seed_genes.json")
+    save_json({"opengenes_queries": opengenes_seeding_queries}, bp_dir / "seeding_queries.json")
+
+    # Save final state files
+    save_json(final_evidence, bp_dir / "gene_evidence.json")
+    save_json(json.loads(final_sok) if isinstance(final_sok, str) else final_sok, bp_dir / "state_of_knowledge.json")
+    save_json(json.loads(final_scratchpad) if isinstance(final_scratchpad, str) else final_scratchpad, bp_dir / "research_scratchpad.json")
+
+    # Save trace files
+    save_json(tool_calls, bp_dir / "tool_call_history.json")
+    save_json(reasoning, bp_dir / "reasoning_trace.json")
+    save_json(warnings, bp_dir / "warnings.json")
+
+    # Save full result for complete audit trail
+    save_json(result, bp_dir / "full_result.json")
 
     # Save genes to TSV
-    genes_file = output_dir / args.hallmark / f"bp{args.bp_rank}_scored_genes.tsv"
+    genes_file = bp_dir / "scored_genes.tsv"
     with genes_file.open("w") as f:
         f.write("gene_symbol\tscore\tevidence_summary\tsources\tbiological_process\n")
         for g in genes:
             f.write(f"{g.get('gene_symbol', '')}\t{g.get('score', '')}\t{g.get('evidence_summary', '')}\t{','.join(g.get('sources', []))}\t{g.get('biological_process', '')}\n")
     print(f"Saved scored genes to: {genes_file}")
 
+    # Summary
     print(f"\n{'='*60}")
     print("RESULTS")
     print(f"{'='*60}")
     print(f"Genes found: {len(genes)}")
     print(f"GO terms found: {len(go_terms)}")
-
-    set_trace()
+    print(f"Tool calls: {len(tool_calls)}")
+    print(f"Warnings: {len(warnings)}")
 
     if genes:
         print("\nTop genes:")
@@ -235,7 +322,8 @@ def main() -> int:
                 print(f"  - {name} (score: {score})")
                 seen.add(name)
 
-    print("\n✅ Phase 2 smoke test (from seed) passed")
+    print(f"\n✅ Phase 2 smoke test (from seed) passed")
+    print(f"✅ All outputs saved to: {bp_dir}")
     return 0
 
 

@@ -9,11 +9,11 @@ from aging_bd_agentic_system.agents.phase1_bp_identifier import (
 from aging_bd_agentic_system.agents.phase2_gene_researcher import (
     advance_bp,
     map_go_terms,
-    phase2_critic,
-    phase2_refine,
     phase2_research,
     select_bp,
 )
+from aging_bd_agentic_system.agents.phase2_critic import phase2_critic
+from aging_bd_agentic_system.agents.phase2_refine import phase2_refine
 
 __all__ = [
     "advance_bp",

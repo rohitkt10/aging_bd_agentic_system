@@ -103,6 +103,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--phase2-summarize-max-tokens", type=int, help="Phase 2: Max tokens before summarization"
     )
+    parser.add_argument(
+        "--max-critic-iterations", type=int, help="Max critic-refine cycles"
+    )
+    parser.add_argument(
+        "--refine-opengenes-max-results", type=int, help="OpenGenes results per query during refinement"
+    )
+    parser.add_argument(
+        "--refine-pubmed-max-results", type=int, help="PubMed results per query during refinement"
+    )
+    parser.add_argument(
+        "--refine-vector-db-top-k", type=int, help="Vector DB results per query during refinement"
+    )
 
     return parser.parse_args()
 
@@ -152,6 +164,10 @@ def _print_config(config: RunConfig) -> None:
     print(f"  phase2_vector_db_top_k: {p2.get('phase2_vector_db_top_k')}")
     print(f"  phase2_pubmed_retmax: {p2.get('phase2_pubmed_retmax')}")
     print(f"  phase2_summarize_max_tokens: {p2.get('phase2_summarize_max_tokens')}")
+    print(f"  max_critic_iterations: {p2.get('max_critic_iterations')}")
+    print(f"  refine_opengenes_max_results: {p2.get('refine_opengenes_max_results')}")
+    print(f"  refine_pubmed_max_results: {p2.get('refine_pubmed_max_results')}")
+    print(f"  refine_vector_db_top_k: {p2.get('refine_vector_db_top_k')}")
 
     print("\n" + "=" * 60 + "\n")
 
@@ -180,6 +196,11 @@ def _initial_state(config: RunConfig) -> dict[str, Any]:
         "phase2_critic_iteration": 0,
         "phase2_research_iteration": 0,
         "phase2_eval": {},
+        "critic_iteration": 0,
+        "critic_review": None,
+        "refinement_history": [],
+        "state_of_knowledge": None,
+        "gene_evidence": {},
         "genes_found": [],
         "go_terms_found": [],
     }
@@ -219,6 +240,10 @@ def main() -> None:
         phase2_vector_db_top_k=args.phase2_vector_db_top_k,
         phase2_pubmed_retmax=args.phase2_pubmed_retmax,
         phase2_summarize_max_tokens=args.phase2_summarize_max_tokens,
+        max_critic_iterations=args.max_critic_iterations,
+        refine_opengenes_max_results=args.refine_opengenes_max_results,
+        refine_pubmed_max_results=args.refine_pubmed_max_results,
+        refine_vector_db_top_k=args.refine_vector_db_top_k,
     )
 
     # Validate hallmark is set

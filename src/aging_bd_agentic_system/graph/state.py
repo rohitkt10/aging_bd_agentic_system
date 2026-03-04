@@ -43,12 +43,15 @@ class ResearchState(TypedDict):
     # Phase 2 tracking
     current_bp_index: int
     current_bp_name: str
-    phase2_critic_iteration: int
+    phase2_critic_iteration: int  # Legacy field (deprecated, use critic_iteration)
     phase2_research_iteration: int
     phase2_eval: Dict[str, Any]
+    critic_iteration: int  # Current critic-refine iteration
+    critic_review: Optional[Dict[str, Any]]  # Latest critic review output
+    refinement_history: Annotated[List[Dict[str, Any]], operator.add]  # List of refinement outputs (for audit)
     state_of_knowledge: Optional[str]  # JSON: {candidate_genes, citations, summary}
     gene_evidence: Dict[str, Any]  # {gene_sym: {opengenes: bool, genage: bool, evidence_notes: [], citations: []}}
 
-    # Phase 2 outputs (accumulated across all BPs)
-    genes_found: Annotated[List[Dict[str, Any]], operator.add]
+    # Phase 2 outputs (per BP, replaced each cycle)
+    genes_found: List[Dict[str, Any]]
     go_terms_found: Annotated[List[Dict[str, Any]], operator.add]

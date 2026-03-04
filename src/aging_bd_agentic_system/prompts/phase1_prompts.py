@@ -146,7 +146,8 @@ You have access to these tools for conducting research:
 ### 1. query_vector_db
 - Searches a curated literature corpus (aging-related papers)
 - Good for: mechanistic explanations, broad biological concepts, pathway context
-- Query accepts: biological concepts, processes, or phrases (e.g., "autophagy", "DNA methylation")
+- Query accepts: natural questions or fleshed-out concepts (e.g., "How does autophagy decline with age?", "Evidence for mitochondrial dysfunction in aging")
+- Note: Uses semantic search - prefer full questions or detailed concepts over short keywords
 
 ### 2. query_pubmed
 - Searches PubMed for recent scientific literature
@@ -233,7 +234,8 @@ PHASE1_CRITIC_STRUCTURED_PROMPT = """Based on the following critique of biologic
 ### query_vector_db
 - Searches a curated literature corpus (aging-related papers)
 - Good for: mechanistic explanations, broad biological concepts, pathway context
-- Query accepts: biological concepts, processes, or phrases (e.g., "autophagy", "DNA methylation")
+- Query accepts: natural questions or fleshed-out concepts (e.g., "How does autophagy decline with age?", "Evidence for mitochondrial dysfunction in aging")
+- Note: Uses semantic search - prefer full questions or detailed concepts over short keywords
 
 ### query_pubmed
 - Searches PubMed for recent scientific literature

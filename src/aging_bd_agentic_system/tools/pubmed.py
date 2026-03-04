@@ -99,9 +99,12 @@ def query_pubmed(
     api_key = api_key or os.getenv("NCBI_API_KEY")
     _init_entrez(email, api_key)
 
+    # Filter for research articles only (exclude editorials, letters, news)
+    filtered_query = f"({query}) AND Journal Article[ptyp] NOT Editorial[ptyp] NOT Letter[ptyp] NOT News[ptyp]"
+
     search_kwargs: dict[str, Any] = {
         "db": "pubmed",
-        "term": query,
+        "term": filtered_query,
         "retmax": retmax,
         "sort": "relevance",
     }

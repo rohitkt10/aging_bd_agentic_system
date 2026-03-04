@@ -58,19 +58,41 @@ class Phase2Config:
     # Context management
     phase2_summarize_max_tokens: int = 100000
 
+    # Critic-refine loop settings
+    max_critic_iterations: int = 2
+    refine_opengenes_max_results: int = 15
+    refine_pubmed_max_results: int = 10
+    refine_vector_db_top_k: int = 10
+
 
 @dataclass
 class LLMConfig:
-    """Configuration for LLM client."""
+    """Configuration for LLM client with two-tier model system."""
 
     provider: str = "vertex"  # "vertex" or "openai"
-    model: str = "gemini-2.5-pro"  # Model name (provider-specific)
+
+    # Two-tier model system:
+    # - model: Base fallback for both tiers (used if model_low/model_high not set)
+    # - model_low: Cheaper/faster model for most tasks (overrides model if set)
+    # - model_high: More capable model for complex tasks (defaults to model_low if not set)
+    model: str = "gemini-2.5-pro"  # Base model (fallback)
+    model_low: str | None = None  # If None, uses model
+    model_high: str | None = None  # If None, uses resolved model_low
+
     temperature: float = 0.7
     max_tokens: int | None = None
     # Vertex-specific
     vertex_location: str = "us-central1"
     # OpenAI-specific
     openai_base_url: str | None = None
+
+    def get_model_low(self) -> str:
+        """Get resolved model_low (model_low if set, else model)."""
+        return self.model_low if self.model_low else self.model
+
+    def get_model_high(self) -> str:
+        """Get resolved model_high (model_high if set, else resolved model_low)."""
+        return self.model_high if self.model_high else self.get_model_low()
 
 
 @dataclass
@@ -169,6 +191,10 @@ class RunConfig:
             self.llm.provider = kwargs["provider"]
         if kwargs.get("model"):
             self.llm.model = kwargs["model"]
+        if kwargs.get("model_low"):
+            self.llm.model_low = kwargs["model_low"]
+        if kwargs.get("model_high"):
+            self.llm.model_high = kwargs["model_high"]
         if kwargs.get("temperature") is not None:
             self.llm.temperature = kwargs["temperature"]
         if kwargs.get("max_tokens") is not None:
@@ -217,5 +243,13 @@ class RunConfig:
             self.phase2.max_opengenes_items_per_field = kwargs["max_opengenes_items_per_field"]
         if kwargs.get("phase2_summarize_max_tokens") is not None:
             self.phase2.phase2_summarize_max_tokens = kwargs["phase2_summarize_max_tokens"]
+        if kwargs.get("max_critic_iterations") is not None:
+            self.phase2.max_critic_iterations = kwargs["max_critic_iterations"]
+        if kwargs.get("refine_opengenes_max_results") is not None:
+            self.phase2.refine_opengenes_max_results = kwargs["refine_opengenes_max_results"]
+        if kwargs.get("refine_pubmed_max_results") is not None:
+            self.phase2.refine_pubmed_max_results = kwargs["refine_pubmed_max_results"]
+        if kwargs.get("refine_vector_db_top_k") is not None:
+            self.phase2.refine_vector_db_top_k = kwargs["refine_vector_db_top_k"]
 
         return self

@@ -1,21 +1,35 @@
 """
 LLM client singleton for agent use.
 
+Supports two-tier model system:
+- Low tier (default): Cheaper/faster model for most tasks
+- High tier: More capable model for complex tasks
+
 Usage:
-    from aging_bd_agentic_system.llm.client import get_llm, init_llm
+    from aging_bd_agentic_system.llm import get_llm, init_llm
 
     # Initialize with config (call once at startup)
     init_llm(config.llm)
 
-    # Get the singleton client
+    # Get the singleton client (uses low tier by default)
     llm = get_llm()
     response = llm.invoke("What are biological processes?")
+
+    # Use high tier for complex tasks
+    with llm.high_tier():
+        result = llm.invoke(complex_prompt)
+
+    # Or explicit set/reset
+    llm.set_tier("high")
+    result = llm.invoke(complex_prompt)
+    llm.set_tier("low")
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Generator
 
 from aging_bd_agentic_system.config import LLMConfig
 
@@ -24,10 +38,10 @@ from .providers import LLMProvider, OpenAIProvider, VertexGeminiProvider
 
 class LLMClient:
     """
-    Main LLM client that wraps a provider.
+    Main LLM client with two-tier model support.
 
-    This class provides a simple interface for agents to call LLMs
-    without knowing which provider is being used.
+    Holds two providers (low/high tier) and allows switching between them.
+    Low tier is used by default for most tasks.
     """
 
     def __init__(self, config: LLMConfig | None = None) -> None:
@@ -35,25 +49,38 @@ class LLMClient:
         Initialize LLM client from config.
 
         Args:
-            config: LLMConfig with provider, model, temperature, etc.
+            config: LLMConfig with provider, model, model_low, model_high, etc.
                     If None, uses defaults from LLMConfig().
 
         Raises:
             ValueError: If required config variables are not set.
         """
         self.config = config or LLMConfig()
+        self._current_tier: str = "low"
 
+        # Lazy-init providers on first access
+        self._providers: dict[str, LLMProvider | None] = {"low": None, "high": None}
+
+    def _get_or_init_provider(self, tier: str) -> LLMProvider:
+        """Get provider for tier, initializing lazily if needed."""
+        if self._providers[tier] is None:
+            model = self.config.get_model_low() if tier == "low" else self.config.get_model_high()
+            self._providers[tier] = self._init_provider(model)
+        return self._providers[tier]
+
+    def _init_provider(self, model: str) -> LLMProvider:
+        """Initialize a provider with specific model."""
         if self.config.provider == "openai":
-            self.provider = self._init_openai()
+            return self._init_openai(model)
         elif self.config.provider == "vertex":
-            self.provider = self._init_vertex()
+            return self._init_vertex(model)
         else:
             raise ValueError(
                 f"Unknown LLM provider: {self.config.provider}. Must be 'vertex' or 'openai'."
             )
 
-    def _init_vertex(self) -> LLMProvider:
-        """Initialize Vertex AI Gemini provider."""
+    def _init_vertex(self, model: str) -> LLMProvider:
+        """Initialize Vertex AI Gemini provider with specific model."""
         project_id = os.environ.get("VERTEX_PROJECT_ID")
         if not project_id:
             raise ValueError(
@@ -64,13 +91,13 @@ class LLMClient:
         return VertexGeminiProvider(
             project_id=project_id,
             location=self.config.vertex_location,
-            model=self.config.model,
+            model=model,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
         )
 
-    def _init_openai(self) -> LLMProvider:
-        """Initialize OpenAI provider."""
+    def _init_openai(self, model: str) -> LLMProvider:
+        """Initialize OpenAI provider with specific model."""
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise ValueError(
@@ -80,11 +107,48 @@ class LLMClient:
 
         return OpenAIProvider(
             api_key=api_key,
-            model=self.config.model,
+            model=model,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
             base_url=self.config.openai_base_url,
         )
+
+    @property
+    def provider(self) -> LLMProvider:
+        """Get current active provider based on tier."""
+        return self._get_or_init_provider(self._current_tier)
+
+    def set_tier(self, tier: str) -> None:
+        """
+        Switch between 'low' and 'high' model tiers.
+
+        Args:
+            tier: 'low' for cheap/fast model, 'high' for capable model.
+
+        Raises:
+            ValueError: If tier is not 'low' or 'high'.
+        """
+        if tier not in ("low", "high"):
+            raise ValueError(f"Invalid tier: {tier}. Must be 'low' or 'high'.")
+        self._current_tier = tier
+
+    @contextmanager
+    def high_tier(self) -> Generator[None, None, None]:
+        """
+        Context manager for temporary high-tier usage.
+
+        Automatically resets to previous tier on exit.
+
+        Usage:
+            with llm.high_tier():
+                result = llm.invoke(complex_prompt)
+        """
+        prev = self._current_tier
+        self.set_tier("high")
+        try:
+            yield
+        finally:
+            self.set_tier(prev)
 
     def invoke(
         self, prompt: str, *, system_prompt: str | None = None, **kwargs: Any

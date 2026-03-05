@@ -75,3 +75,5 @@ CHANGELOG_INTERNAL.md
 corpus_setup.sh
 run_test_expt.sh
 jobs/
+tmp.py
+tmp.tsv

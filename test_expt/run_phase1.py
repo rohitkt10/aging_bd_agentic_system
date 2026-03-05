@@ -52,6 +52,7 @@ def main() -> int:
 
     # Load config from YAML
     config_path = Path(args.config)
+    print(f"CONFIG PATH: {config_path}")
     if not config_path.exists():
         print(f"ERROR: Config file not found: {config_path}")
         return 1

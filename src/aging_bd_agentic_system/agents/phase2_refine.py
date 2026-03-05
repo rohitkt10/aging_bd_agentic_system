@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from pathlib import Path
 from pdb import set_trace
 from aging_bd_agentic_system.llm import get_llm
 from aging_bd_agentic_system.prompts.phase2_refine_prompts import (
@@ -24,6 +25,8 @@ from aging_bd_agentic_system.tools import (
     query_vector_db_batch,
 )
 
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parents[3] / ".env")
 
 def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
     """
@@ -338,7 +341,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
         vectordb_summary=json.dumps(vectordb_summary, indent=2) if vectordb_summary else "{}",
         gene_evidence_subset=json.dumps(gene_evidence_subset, indent=2),
     )
-
+    llm.set_tier("high")
     try:
         state_update = llm.invoke_structured(state_update_prompt, schema=state_update_schema)
 
@@ -374,7 +377,9 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
 
     except Exception as e:
         print(f"  Warning: State update failed: {e}")
-
+    
+    llm.set_tier("low")
+    
     # ===== STEP 4: Scoring (separate call, same as phase2_research) =====
     print("  Scoring genes...")
 
@@ -406,6 +411,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
         gene_evidence=json.dumps(gene_evidence, indent=2),
     )
 
+    llm.set_tier("high")
     try:
         scoring_response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
         updated_genes = scoring_response.get("genes", [])
@@ -439,6 +445,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
                             "sources": summary.get("citations", [])[:2],
                             "biological_process": bp_name,
                         })
+    llm.set_tier("low")
 
     # Build refinement record for audit trail
     old_gene_symbols = {g.get("gene_symbol") for g in genes_found}

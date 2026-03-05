@@ -72,4 +72,6 @@ AGENTS.md
 CHANGELOG_INTERNAL.md 
 
 # slurm scripts 
-corpus_setup.sh 
+corpus_setup.sh
+run_test_expt.sh
+jobs/

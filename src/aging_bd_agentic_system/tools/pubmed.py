@@ -4,7 +4,8 @@ import os
 from typing import Any
 
 from Bio import Entrez
-
+import time 
+import random
 
 def _init_entrez(email: str, api_key: str | None = None) -> None:
     """Initialize Entrez with required email and optional API key."""
@@ -115,22 +116,34 @@ def query_pubmed(
         if date_to:
             search_kwargs["maxdate"] = date_to
 
-    handle = Entrez.esearch(**search_kwargs)
-    res = Entrez.read(handle)
-    handle.close()
+    max_retries = 2
+    retry_delay = 2.
+    for attempt in range(max_retries):
+        try:
+            handle = Entrez.esearch(**search_kwargs)
+            res = Entrez.read(handle)
+            handle.close()
 
-    ids = res.get("IdList", [])
-    if not ids:
-        return []
+            ids = res.get("IdList", [])
+            if not ids:
+                return []
 
-    fetch_handle = Entrez.efetch(
-        db="pubmed",
-        id=",".join(ids),
-        rettype="abstract",
-        retmode="xml",
-    )
-    records = Entrez.read(fetch_handle)
-    fetch_handle.close()
+            fetch_handle = Entrez.efetch(
+                db="pubmed",
+                id=",".join(ids),
+                rettype="abstract",
+                retmode="xml",
+            )
+            records = Entrez.read(fetch_handle)
+            fetch_handle.close()
+            time.sleep(random.uniform(0.6, 1.)) # add a small delay to avoid rate limiting 
+            break 
+        except:
+            if attempt < max_retries - 1:
+                print(f"PubMed connection dropped (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                raise RuntimeError(f"PubMed fetch failed after {max_retries} attempts for query: {query}") from e
 
     results: list[dict[str, Any]] = []
     for article in records.get("PubmedArticle", []):

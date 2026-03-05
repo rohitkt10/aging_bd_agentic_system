@@ -42,6 +42,9 @@ from aging_bd_agentic_system.tools import (
 from aging_bd_agentic_system.utils.audit_logger import log_event
 from aging_bd_agentic_system.utils.context_manager import summarize_if_needed
 
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parents[3] / ".env")
+
 
 # ===== GRAPH NODE FUNCTIONS =====
 
@@ -333,6 +336,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     # Step 1: Synthesize research priorities (free-form invoke)
     print(f"Summarizing current state of knowledge..")
     llm = get_llm()
+    llm.set_tier("high")
     synthesize_prompt = PHASE2_SYNTHESIZE_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
@@ -345,8 +349,10 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         summary=state_of_knowledge.get("summary", "No summary yet."),
     )
     research_priorities = llm.invoke(synthesize_prompt)
+    
 
     # Step 2: Decide tool calls (structured invoke)
+    llm.set_tier("low")
     decision_schema = {
         "title": "research_decision",
         "type": "object",
@@ -416,7 +422,15 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
 
     print(f"Deciding on research tool calls..")
     decisions = llm.invoke_structured(decision_prompt, schema=decision_schema)
-    findings_notes = decisions['findings_notes'] 
+    
+    findings_notes = decisions.get('findings_notes')
+    if findings_notes is None:
+        print(
+            f"[WARN] findings_notes missing from structured response "
+            f"(iteration {current_iteration}/{max_iterations}, hallmark={hallmark}). "
+            f"Proceeding without audit notes."
+            )
+        findings_notes = []
     
     # Build findings summary (from research iterations)
     findings = research_data.get("research_findings", [])
@@ -600,7 +614,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         gene_evidence_subset=json.dumps(gene_evidence_subset, indent=2),
     )
     
-    state_update = llm.invoke_structured(state_update_prompt, schema=state_update_schema)
+    with llm.high_tier():
+        state_update = llm.invoke_structured(state_update_prompt, schema=state_update_schema)
 
     # Apply updates to state_of_knowledge
     new_genes = state_update.get("new_candidate_genes", [])
@@ -681,7 +696,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             "required": ["genes"],
         }
         print("Finalize initial research. Score available genes...")
-        
+        llm.set_tier("high")
         try:
             response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
             scored_genes = response.get("genes", [])
@@ -689,6 +704,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             scored_genes = []
         for gene in scored_genes:
             gene["biological_process"] = bp_name
+        llm.set_tier("low")
 
         # Save pre-critic snapshot (research complete, before critic/refine)
         bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed

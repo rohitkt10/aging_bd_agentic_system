@@ -327,7 +327,9 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
                     """
 
     llm = get_llm()
-    
+    print("")
+    llm.set_tier("high")
+    print(f"Using model id: {llm.config.get_model_high()} for planning...")
     try:
         plan = llm.invoke_structured(
             user_prompt, schema=RESEARCH_PLAN_SCHEMA, system_prompt=system_prompt
@@ -337,7 +339,8 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
         response = llm.invoke(user_prompt, system_prompt=system_prompt)
         plan = _extract_json_from_response(response)
-
+    llm.set_tier("low")
+    print(f"Switching to model id: {llm.config.get_model_low()} for research...")
     return {"phase1_plan": plan}
 
 def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
@@ -410,7 +413,7 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
             for term in goal.get("pubmed_terms", []):
                 results = query_pubmed(query=term, retmax=pubmed_retmax)
                 goal_pubmed_results.extend(results)
-                time.sleep(0.34)  # Rate limit: stay under 3 req/sec
+                #time.sleep(0.34)  # Rate limit: stay under 3 req/sec
 
             # Summarize this goal's results
             if goal_corpus_results or goal_pubmed_results:
@@ -478,7 +481,7 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
         for query in critic_recommendations.get("pubmed_queries", []):
             results = query_pubmed(query=query, retmax=pubmed_retmax)
             critic_pubmed_results.extend(results)
-            time.sleep(0.34)  # Rate limit: stay under 3 req/sec
+            #time.sleep(0.34)  # Rate limit: stay under 3 req/sec
 
         # Log refinement results
         print("\n" + "-" * 50)
@@ -535,6 +538,9 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
 
     # === CALL LLM ===
     print("[phase1_research] Synthesize search results...")
+    
+    print(f"Switching to high tier model for overall synthesis...")
+    llm.set_tier("high")
     try:
         result = llm.invoke_structured(
             user_context,
@@ -570,6 +576,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
         response = llm.invoke(user_context, system_prompt=system_prompt)
         processes = _extract_json_from_response(response)
+    llm.set_tier("low")
+    print(f"Switching back to low tier model...")
     
     # Validate and deduplicate
     if not processes:

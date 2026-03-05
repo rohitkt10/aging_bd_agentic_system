@@ -17,16 +17,20 @@ Understanding the specific molecular mechanisms within each hallmark is critical
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes, then discovers genes associated with each process.
 
 ## Workflow
-- Phase 1 (current): Identify 10-15 biological processes for a hallmark
+- Phase 1 (current): Identify {min_processes}-{max_processes} biological processes for a hallmark
 - Phase 2: For each process, discover 300-500 relevant genes
 
 ## Your Role
 
-You are the biological process identifier. Given research evidence about the hallmark (including the López-Otín paper), identify distinct mechanistic processes that comprise it.
+You are the biological process identifier for Phase 1. Given research evidence about the hallmark (including the López-Otín paper), identify distinct mechanistic processes that comprise it.
+
+**Why this matters**: Phase 2 will use these processes to discover genes. If processes are too broad, gene lists become noisy. If too narrow, we miss important genes. If wrong, we waste compute on irrelevant searches.
+
+**Ultimate Goal**: {min_processes}-{max_processes} high-quality, mechanistically distinct processes with solid evidence.
 
 ## Task
 
-Identify 10-15 biological processes that comprise the hallmark: {hallmark_name}
+Identify {min_processes}-{max_processes} biological processes that comprise the hallmark: {hallmark_name}
 
 ## Process Criteria
 - Each process must be mechanistically distinct (no overlap)
@@ -57,7 +61,7 @@ Return ONLY a JSON object with a "processes" array:
 ```
 
 Requirements:
-- Exactly 10-15 processes
+- Exactly {min_processes}-{max_processes} processes
 - Each evidence_summary must cite sources
 - Scores are integers 1-10
 - Return JSON only, no additional text
@@ -74,12 +78,14 @@ Understanding the specific molecular mechanisms within each hallmark is critical
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes, then discovers genes associated with each process.
 
 ## Workflow
-- Phase 1 (current): Identify 10-15 biological processes for a hallmark
+- Phase 1 (current): Identify {min_processes}-{max_processes} biological processes for a hallmark
 - Phase 2: For each process, discover 300-500 relevant genes
 
 ## Your Role
 
 You are refining an existing list of biological processes based on additional evidence gathered from critic feedback. Your task is to update the existing process list to address gaps identified by the critic.
+
+**Why this matters**: Phase 2 will use these processes to discover genes. Refined processes must be accurate and well-supported to guide effective gene discovery.
 
 ## Your Inputs
 
@@ -95,7 +101,7 @@ Update the existing biological process list for hallmark: {hallmark_name}
 - Add new processes supported by the new evidence
 - Enhance evidence for existing processes where new evidence applies
 - Ensure coverage of the focus areas identified by the critic
-- Maintain 10-15 distinct, mechanistically sound processes
+- Maintain {min_processes}-{max_processes} distinct, mechanistically sound processes
 - Remove processes only if evidence clearly contradicts them
 
 ## Process Criteria
@@ -127,7 +133,7 @@ Return ONLY a JSON object with a "processes" array containing the UPDATED list:
 ```
 
 Requirements:
-- Exactly 10-15 processes
+- Exactly {min_processes}-{max_processes} processes
 - Each evidence_summary must cite sources
 - Scores are integers 1-10
 - Return JSON only, no additional text
@@ -135,27 +141,46 @@ Requirements:
 
 # ===== PHASE 1 PLANNING PROMPT =====
 
-PHASE1_PLAN_SYSTEM_PROMPT = """You are an expert research planner for aging biology.
+PHASE1_PLAN_SYSTEM_PROMPT = """## Biological Motivation
+
+Aging is driven by the progressive accumulation of molecular and cellular damage. The López-Otín hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
+
+## System Purpose
+
+This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes, then discovers genes associated with each process.
+
+## Workflow
+- Phase 1 (current): Identify {min_processes}-{max_processes} biological processes for a hallmark
+- Phase 2: For each process, discover 300-500 relevant genes
+
+## Your Role
+
+You are the research planner for Phase 1. Your job is to generate focused research goals with tool-specific search terms.
+
+**Why this matters**: Good search terms lead to relevant evidence. Relevant evidence leads to accurate biological process identification. Poor search terms waste iterations and miss key processes.
 
 ## Task
+
 Create a research plan to identify biological processes for the aging hallmark: {hallmark_name}
 
 ## Available Research Tools
-You have access to these tools for conducting research:
 
 ### 1. query_vector_db
 - Searches a curated literature corpus (aging-related papers)
 - Good for: mechanistic explanations, broad biological concepts, pathway context
-- Query accepts: natural questions or fleshed-out concepts (e.g., "How does autophagy decline with age?", "Evidence for mitochondrial dysfunction in aging")
-- Note: Uses semantic search - prefer full questions or detailed concepts over short keywords
+- Query accepts: natural questions or fleshed-out concepts (e.g., "How does autophagy decline with age?")
+- Note: Uses semantic search - prefer full questions over short keywords
 
 ### 2. query_pubmed
 - Searches PubMed for recent scientific literature
 - Good for: recent studies, specific mechanisms, gene-function relationships
-- Query accepts: search strings with boolean operators (e.g., "DNA methylation AND aging")
+- Query REQUIRES: boolean search syntax with AND/OR operators
+- CORRECT: "DNA methylation AND aging AND mechanism", "telomere attrition OR telomere shortening AND aging"
+- INCORRECT: "DNA methylation aging mechanism", "telomere attrition in aging" (these will NOT work)
 
 ## Your Goal
-Generate {min_goals}-{max_goals} research goals. For each goal, suggest specific search terms for both tools.
+
+Generate {min_goals}-{max_goals} research goals. For each goal, provide 3-4 search terms per tool (vector_db_terms and pubmed_terms).
 
 ## Good Research Goals
 - Specific to the hallmark's molecular/cellular mechanisms
@@ -169,8 +194,17 @@ Return ONLY JSON:
   "research_goals": [
     {{
       "goal": "Investigate DNA methylation changes in aging",
-      "vector_db_terms": ["DNA methylation aging", "epigenetic clock"],
-      "pubmed_terms": ["DNA methylation AND aging AND mechanism"]
+      "vector_db_terms": [
+        "How does DNA methylation change with age?",
+        "What is the evidence for epigenetic clocks in aging?",
+        "What mechanisms drive DNA methylation drift during aging?"
+      ],
+      "pubmed_terms": [
+        "DNA methylation AND aging AND mechanism",
+        "epigenetic clock AND biological age",
+        "DNA methylation drift AND aging",
+        "age-related hypermethylation AND hypomethylation"
+      ]
     }}
   ]
 }}
@@ -181,21 +215,39 @@ Return JSON only, no additional text.
 
 # ===== PHASE 1 CRITIC PROMPTS (TWO-STEP) =====
 
-PHASE1_CRITIC_SYSTEM_PROMPT = """## Research Context
+PHASE1_CRITIC_SYSTEM_PROMPT = """## Biological Motivation
 
-You are part of an automated aging biology research system that curates gene lists for downstream analysis and experimental validation.
+Aging is driven by the progressive accumulation of molecular and cellular damage. The López-Otín hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
 
-**The Framework:** The system is based on the López-Otín hallmarks of aging (Cell 2023) - 12 fundamental biological processes that drive aging: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
+Understanding the specific molecular mechanisms within each hallmark is critical for developing interventions that slow or reverse aging. This requires identifying the discrete biological processes that comprise each hallmark, then discovering the genes that execute these processes.
 
-**What is a "biological process" in this context:**
+## System Purpose
+
+This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes, then discovers genes associated with each process.
+
+## Workflow
+- Phase 1 (current): Identify {min_processes}-{max_processes} biological processes for a hallmark
+- Phase 2: For each process, discover 300-500 relevant genes
+
+## What Counts as a Valid Biological Process
+
+A biological process in this context is:
 - A specific molecular/cellular mechanism (NOT an outcome)
-- Must be distinct enough to guide gene discovery in Phase 2
-- Examples: "DNA methylation drift", "histone deacetylase decline", "nuclear lamina deterioration"
-- Bad examples: "aging", "cell death", "disease" (too vague, or outcomes not mechanisms)
+- Distinct enough to guide gene discovery in Phase 2
 
-**Downstream Impact:** Phase 2 will use these processes to discover 300-500 genes. If processes are too broad, gene lists become noisy. If too narrow, we miss important genes. If wrong, we waste compute on irrelevant searches.
+Good examples: "DNA methylation drift", "histone deacetylase decline", "nuclear lamina deterioration"
+Bad examples: "aging", "cell death", "disease" (too vague, or outcomes not mechanisms)
 
-**Goal:** 10-15 high-quality, mechanistically distinct processes with solid evidence."""
+## Downstream Impact
+
+Phase 2 will use these processes to discover 300-500 genes. Poor process definitions lead to:
+- Too broad → noisy gene lists
+- Too narrow → missed important genes
+- Wrong → wasted compute on irrelevant searches
+
+## Goal
+
+{min_processes}-{max_processes} high-quality, mechanistically distinct processes with solid evidence."""
 
 PHASE1_CRITIC_UNSTRUCTURED_PROMPT = """## Processes to Review for Hallmark: {hallmark_name}
 
@@ -206,15 +258,14 @@ You are at iteration {current_iteration} of {max_iterations} total evaluation cy
 If this is the final iteration, make your critique definitive.
 
 ## Your Task
-Write a brief critique (~150 words). Keep in mind that our overall goal is to obtain **10-15 distinct, mechanistically sound processes.**
+Write a brief critique (~150 words). Keep in mind that our overall goal is to obtain **{min_processes}-{max_processes} distinct, mechanistically sound processes.**
 
 Consider:
 - Are there obvious gaps or missing themes?
 - Is there redundancy or overlap?
 - Is evidence quality adequate?
 - Are these mechanistic processes (not outcomes)?
-
-- Current count vs. target (10-15)?
+- Current count vs. target ({min_processes}-{max_processes})?
 
 Be direct and actionable.
 
@@ -240,7 +291,9 @@ PHASE1_CRITIC_STRUCTURED_PROMPT = """Based on the following critique of biologic
 ### query_pubmed
 - Searches PubMed for recent scientific literature
 - Good for: recent studies, specific mechanisms, gene-function relationships
-- Query accepts: search strings with boolean operators (e.g., "DNA methylation AND aging")
+- Query REQUIRES: boolean search syntax with AND/OR operators
+- CORRECT: "DNA methylation AND aging AND mechanism", "telomere attrition OR telomere shortening AND aging"
+- INCORRECT: "DNA methylation aging mechanism", "telomere attrition in aging" (these will NOT work)
 
 ## Your Task
 Parse the critique and output structured tool recommendations for refinement.
@@ -272,19 +325,21 @@ Return JSON only, no additional text.
 
 # ===== PHASE 1 SUMMARIZATION PROMPTS =====
 
-PHASE1_SUMMARY_SYSTEM_PROMPT = """You are a research summarizer for an automated aging biology discovery system.
+PHASE1_SUMMARY_SYSTEM_PROMPT = """## Biological Motivation
+
+Aging is driven by the progressive accumulation of molecular and cellular damage. The López-Otín hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
+
+Understanding the specific molecular mechanisms within each hallmark is critical for developing interventions that slow or reverse aging. This requires identifying the discrete biological processes that comprise each hallmark, then discovering the genes that execute these processes.
 
 ## System Overview
 This system automates the curation of aging-related gene lists, replacing manual literature review workflows. It is designed to produce comprehensive, well-documented outputs suitable for downstream biological analysis and experimental validation.
-
-The system is based on the 12 hallmarks of aging framework from López-Otín et al. (Cell 2023). Each hallmark (e.g., "genomic instability", "epigenetic alterations", "mitochondrial dysfunction") represents a major category of age-related biological decline.
 
 ## Workflow Context
 The system operates in two phases:
 
 **Phase 1 - Biological Process Identification (current phase)**:
 - Input: An aging hallmark name
-- Output: 10-15 biological processes that comprise the hallmark
+- Output: {min_processes}-{max_processes} biological processes that comprise the hallmark
 - A "biological process" is a specific molecular/cellular mechanism, not an outcome
 - Examples: "DNA methylation drift", "histone deacetylase decline", "nuclear lamina deterioration"
 - Bad examples: "aging", "disease", "cell death" (too vague or are outcomes, not mechanisms)

@@ -160,14 +160,14 @@ def phase2_seeding(state: dict[str, Any]) -> dict[str, Any]:
     # Persist seed genes to disk
     bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed
     output_dir = Path(cfg.get("output_dir", "outputs"))
-    seed_file = output_dir / hallmark / f"bp{bp_rank}_seed_genes.json"
+    seed_file = output_dir / hallmark / f"bp{bp_rank}" / "seed_genes.json"
     seed_file.parent.mkdir(parents=True, exist_ok=True)
     with seed_file.open("w") as f:
         json.dump(candidates, f, indent=2)
     print(f"  Saved seed genes to: {seed_file}")
 
     # Persist seeding queries to disk
-    queries_file = output_dir / hallmark / f"bp{bp_rank}_seeding_queries.json"
+    queries_file = output_dir / hallmark / f"bp{bp_rank}" / "seeding_queries.json"
     with queries_file.open("w") as f:
         json.dump({"opengenes_queries": opengenes_queries}, f, indent=2)
     print(f"  Saved seeding queries to: {queries_file}")
@@ -211,13 +211,13 @@ def phase2_seeding(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     # Persist gene_evidence to disk
-    evidence_file = output_dir / hallmark / f"bp{bp_rank}_gene_evidence.json"
+    evidence_file = output_dir / hallmark / f"bp{bp_rank}" / "gene_evidence.json"
     with evidence_file.open("w") as f:
         json.dump(gene_evidence, f, indent=2)
     print(f"  Saved gene evidence to: {evidence_file}")
 
     # Persist state_of_knowledge to disk
-    sok_file = output_dir / hallmark / f"bp{bp_rank}_state_of_knowledge.json"
+    sok_file = output_dir / hallmark / f"bp{bp_rank}" / "state_of_knowledge.json"
     with sok_file.open("w") as f:
         json.dump(state_of_knowledge, f, indent=2)
     print(f"  Saved state_of_knowledge to: {sok_file}")
@@ -651,9 +651,6 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         print(formatted_note)
         research_data.setdefault("reasoning_notes", []).append(formatted_note)
 
-    # Always increment iteration after research
-    #next_iteration = current_iteration + 1
-
     # After final research iteration, score genes
     if current_iteration == max_iterations:
         
@@ -684,7 +681,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             "required": ["genes"],
         }
         print("Finalize initial research. Score available genes...")
-        set_trace()
+        
         try:
             response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
             scored_genes = response.get("genes", [])
@@ -692,11 +689,29 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             scored_genes = []
         for gene in scored_genes:
             gene["biological_process"] = bp_name
-        set_trace()
+
+        # Save pre-critic snapshot (research complete, before critic/refine)
+        bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed
+        output_dir = Path(cfg.get("output_dir", "outputs"))
+        research_result_file = output_dir / hallmark / f"bp{bp_rank}" / "research_result.json"
+        research_result_file.parent.mkdir(parents=True, exist_ok=True)
+
+        research_snapshot = {
+            "genes_found": scored_genes,
+            "research_scratchpad": research_data,
+            "state_of_knowledge": state_of_knowledge,
+            "gene_evidence": gene_evidence,
+            "current_bp_name": bp_name,
+            "phase2_research_iteration": current_iteration,
+        }
+        with research_result_file.open("w") as f:
+            json.dump(research_snapshot, f, indent=2, default=str)
+        print(f"  Saved research snapshot to: {research_result_file}")
+
         return {
             "genes_found": scored_genes,
             "research_scratchpad": json.dumps(research_data, default=str),
-            "phase2_research_iteration": 0,
+            "phase2_research_iteration": current_iteration+1,
             "state_of_knowledge": json.dumps(state_of_knowledge),
             "gene_evidence": gene_evidence,
         }

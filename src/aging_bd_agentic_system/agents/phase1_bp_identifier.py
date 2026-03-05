@@ -188,6 +188,8 @@ def _summarize_goal_results(
     corpus_results: list[dict],
     pubmed_results: list[dict],
     max_words: int = 300,
+    min_processes: int = 10,
+    max_processes: int = 15,
 ) -> dict[str, str]:
     """
     Summarize corpus and PubMed results for a single research goal.
@@ -200,11 +202,19 @@ def _summarize_goal_results(
         corpus_results: List of corpus search results
         pubmed_results: List of PubMed search results
         max_words: Approximate max words per summary section (default 300)
+        min_processes: Minimum number of biological processes to identify
+        max_processes: Maximum number of biological processes to identify
 
     Returns:
         Dict with goal, corpus_summary, and pubmed_summary
     """
     llm = get_llm()
+
+    # Format system prompt with config values
+    system_prompt = PHASE1_SUMMARY_SYSTEM_PROMPT.format(
+        min_processes=min_processes,
+        max_processes=max_processes,
+    )
 
     # Format raw results
     corpus_text = _format_corpus_results(corpus_results) if corpus_results else "No results"
@@ -212,12 +222,15 @@ def _summarize_goal_results(
 
     # Summarize corpus results
     corpus_prompt = PHASE1_CORPUS_SUMMARY_PROMPT.format(
-        system_prompt=PHASE1_SUMMARY_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         goal=goal,
         hallmark_name=hallmark_name,
         results=corpus_text,
         max_words=max_words,
     )
+    
+    print(f"*GOAL*: {goal}")
+    print(f"**Summarizing local literature search results...")
     try:
         corpus_result = llm.invoke_structured(corpus_prompt, schema=GOAL_SUMMARY_SCHEMA)
     except Exception as e:
@@ -226,8 +239,10 @@ def _summarize_goal_results(
         corpus_result = _extract_json_from_response(response)
 
     # Summarize PubMed results
+    print(f"**Summarizing PubMed search results...\n")
+    
     pubmed_prompt = PHASE1_PUBMED_SUMMARY_PROMPT.format(
-        system_prompt=PHASE1_SUMMARY_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         goal=goal,
         hallmark_name=hallmark_name,
         results=pubmed_text,
@@ -239,7 +254,7 @@ def _summarize_goal_results(
         print(f"PubMed structured output failed ({e}), falling back to JSON parsing")
         response = llm.invoke(pubmed_prompt)
         pubmed_result = _extract_json_from_response(response)
-
+    
     # Combine results into expected format
     return {
         "goal": goal,
@@ -291,11 +306,15 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
     p1 = cfg.get("phase1", {})
     min_research_goals = p1.get("min_research_goals", 4)
     max_research_goals = p1.get("max_research_goals", 6)
+    min_processes = p1.get("min_processes", 10)
+    max_processes = p1.get("max_processes", 15)
 
     system_prompt = PHASE1_PLAN_SYSTEM_PROMPT.format(
         hallmark_name=hallmark,
         min_goals=min_research_goals,
         max_goals=max_research_goals,
+        min_processes=min_processes,
+        max_processes=max_processes,
     )
 
     user_prompt = f"""## Reference Context
@@ -309,7 +328,6 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
 
     llm = get_llm()
     
-
     try:
         plan = llm.invoke_structured(
             user_prompt, schema=RESEARCH_PLAN_SCHEMA, system_prompt=system_prompt
@@ -348,6 +366,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     vector_db_top_k = p1.get("phase1_vector_db_top_k", 20)
     pubmed_retmax = p1.get("phase1_pubmed_retmax", 10)
     summary_max_words = p1.get("summary_max_words", 300)
+    min_processes = p1.get("min_processes", 10)
+    max_processes = p1.get("max_processes", 15)
 
     # Determine current iteration
     current_iteration = state.get("phase1_iteration", 0)
@@ -358,7 +378,7 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     if current_iteration == 0:
         # === INITIAL RESEARCH PATH ===
         # Execute plan goals, summarize per goal, use PHASE1_SYSTEM_PROMPT
-
+    
         research_goals = plan.get("research_goals", [])
         goal_summaries = []
         print("\n" + "-" * 50)
@@ -400,6 +420,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
                     corpus_results=goal_corpus_results,
                     pubmed_results=goal_pubmed_results,
                     max_words=summary_max_words,
+                    min_processes=min_processes,
+                    max_processes=max_processes,
                 )
                 goal_summaries.append(summary)
 
@@ -428,7 +450,12 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
                             Identify biological processes related to {hallmark} based on this evidence.
                             """
 
-        system_prompt = PHASE1_SYSTEM_PROMPT.format(hallmark_name=hallmark)
+        system_prompt = PHASE1_SYSTEM_PROMPT.format(
+            hallmark_name=hallmark,
+            min_processes=min_processes,
+            max_processes=max_processes,
+        )
+
 
     else:
         # === REFINEMENT RESEARCH PATH ===
@@ -455,7 +482,7 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
 
         # Log refinement results
         print("\n" + "-" * 50)
-        print("REFINEMENT RESEARCH")
+        print(f"REFINEMENT RESEARCH ITERATION {current_iteration}")
         print("-" * 50)
         print(f"  vector_db_queries: {len(vector_db_queries)} -> {len(critic_corpus_results)} results")
         print(f"  pubmed_queries: {len(critic_recommendations.get('pubmed_queries', []))} -> {len(critic_pubmed_results)} results")
@@ -469,6 +496,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
                 corpus_results=critic_corpus_results,
                 pubmed_results=critic_pubmed_results,
                 max_words=summary_max_words,
+                min_processes=min_processes,
+                max_processes=max_processes,
             )
             corpus_summary = summary.get("corpus_summary", "No results")
             pubmed_summary = summary.get("pubmed_summary", "No results")
@@ -498,9 +527,14 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
                         Update the biological process list for {hallmark} based on this new evidence and focus areas.
                         """
 
-        system_prompt = PHASE1_REFINE_SYSTEM_PROMPT.format(hallmark_name=hallmark)
+        system_prompt = PHASE1_REFINE_SYSTEM_PROMPT.format(
+            hallmark_name=hallmark,
+            min_processes=min_processes,
+            max_processes=max_processes,
+        )
 
     # === CALL LLM ===
+    print("[phase1_research] Synthesize search results...")
     try:
         result = llm.invoke_structured(
             user_context,
@@ -545,7 +579,7 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     # Add rank field
     for idx, proc in enumerate(processes, start=1):
         proc["rank"] = idx
-
+    
     return {"biological_processes": processes}
 
 
@@ -569,9 +603,12 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
     cfg = state.get("config", {})
     p1 = cfg.get("phase1", {})
     max_iterations = p1.get("max_iterations", 2)
+    min_processes = p1.get("min_processes", 10)
+    max_processes = p1.get("max_processes", 15)
 
-    # Track iteration
-    current_iteration = state.get("phase1_iteration", 0) + 1
+    # Track iteration (do NOT increment here - refine does that)
+    current_iteration = state.get("phase1_iteration", 0)
+    print(f"[phase1_critic] iteration={current_iteration}, max_iterations={max_iterations}")
     if not processes:
         return {
             "phase1_critique": "No biological processes identified.",
@@ -591,10 +628,16 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
         hallmark_name=hallmark,
         current_iteration=current_iteration,
         max_iterations=max_iterations,
+        min_processes=min_processes,
+        max_processes=max_processes,
         processes_json=processes_json,
     )
 
-    critique_text = llm.invoke(unstructured_prompt, system_prompt=PHASE1_CRITIC_SYSTEM_PROMPT)
+    critic_system_prompt = PHASE1_CRITIC_SYSTEM_PROMPT.format(
+        min_processes=min_processes,
+        max_processes=max_processes,
+    )
+    critique_text = llm.invoke(unstructured_prompt, system_prompt=critic_system_prompt)
 
     # Step 2: Structured recommendations
     structured_prompt = PHASE1_CRITIC_STRUCTURED_PROMPT.format(
@@ -604,11 +647,11 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         recommendations = llm.invoke_structured(
-            structured_prompt, schema=CRITIC_STRUCTURED_SCHEMA, system_prompt=PHASE1_CRITIC_SYSTEM_PROMPT
+            structured_prompt, schema=CRITIC_STRUCTURED_SCHEMA, system_prompt=critic_system_prompt
         )
     except Exception as e:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(structured_prompt, system_prompt=PHASE1_CRITIC_SYSTEM_PROMPT)
+        response = llm.invoke(structured_prompt, system_prompt=critic_system_prompt)
         recommendations = _extract_json_from_response(response)
 
     # Log critic results
@@ -625,6 +668,7 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "phase1_critique": critique_text,
         "phase1_critic_recommendations": recommendations,
+        "phase1_iteration": current_iteration,
     }
 
 
@@ -643,10 +687,13 @@ def phase1_refine(state: dict[str, Any]) -> dict[str, Any]:
     """
     # Increment iteration counter
     iteration = state.get("phase1_iteration", 0) + 1
+    
     state["phase1_iteration"] = iteration
+    print(f"[phase1_refine] iteration={iteration} (incremented from {iteration-1})")
 
-    # Run refinement research (phase1_research will use refinement path since iteration > 0)
-    result = phase1_research(state)
+    updated_state = {**state, "phase1_iteration": iteration}
+    result = phase1_research(updated_state)
+    result["phase1_iteration"] = iteration
     return result
 
 
@@ -654,8 +701,11 @@ def phase1_finalize(state: dict[str, Any]) -> dict[str, Any]:
     """
     Finalize Phase 1 by sorting processes and creating BP queue.
 
-    If critic grade is "fail", first executes refinement research,
-    then finalizes. If grade is "pass", just finalizes.
+    This is only called when:
+    - Critic grade is "pass", OR
+    - We've exhausted max_iterations
+
+    No research happens here - just deterministic sorting and queue creation.
 
     Args:
         state: Workflow state with biological_processes and config
@@ -663,21 +713,14 @@ def phase1_finalize(state: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dict with sorted biological_processes and bp_queue
     """
+    print(f"[phase1_finalize] iteration={state.get('phase1_iteration', 0)}")
     # Read config from state
     cfg = state.get("config", {})
     p1 = cfg.get("phase1", {})
     max_processes = p1.get("max_processes", 15)
 
-    # Check critic grade
-    critic_recommendations = state.get("phase1_critic_recommendations", {})
-    grade = critic_recommendations.get("grade", "fail")
-    
-    # If critic failed, do final refinement research before finalizing
-    if grade == "fail":
-        result = phase1_refine(state)
-        processes = result.get("biological_processes", [])
-    else:
-        processes = list(state.get("biological_processes", []))
+    # Get current processes (no more research)
+    processes = list(state.get("biological_processes", []))
     
     # Sort by evidence score desc, then by process name
     processes.sort(
@@ -702,6 +745,8 @@ def phase1_finalize(state: dict[str, Any]) -> dict[str, Any]:
     write_processes_tsv(out_dir, processes)
 
     # Log Phase 1 completion event
+    critic_recs = state.get("phase1_critic_recommendations", {})
+    grade = critic_recs.get("grade", "unknown")
     log_event({
         "hallmark": hallmark,
         "event_type": "phase1_complete",

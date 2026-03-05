@@ -23,21 +23,115 @@ from aging_bd_agentic_system.agents.phase2_refine import phase2_refine
 from aging_bd_agentic_system.graph.state import ResearchState
 
 
-def phase1_route(state: dict[str, Any]) -> str:
+def phase1_critic_refine_route(state: dict[str, Any]) -> str:
     """Route Phase 1 critique results to refine or finalize."""
     recommendations = state.get("phase1_critic_recommendations", {})
+    grade = recommendations.get("grade", "fail")
+    if grade == "pass":
+        return "phase1_finalize"
+    
+    # continue research
     iteration = state.get("phase1_iteration", 0)
-
-    # Read max_iterations from config
     cfg = state.get("config", {})
     max_iterations = cfg.get("phase1", {}).get("max_iterations", 2)
 
-    grade = recommendations.get("grade", "fail")
+    if iteration < max_iterations:
+        return "phase1_refine"
+    return "phase1_finalize"
 
-    # If critic passes or we've hit max iterations, finalize
-    if grade == "pass" or iteration + 1 >= max_iterations:
+def phase1_refine_finalize_route(state: dict[str, Any]) -> str:
+    """After refining, go to critic only if budget remains, else finalize."""
+    iteration = state.get("phase1_iteration", 0)
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase1", {}).get("max_iterations", 2)
+
+    if iteration >= max_iterations:
         return "phase1_finalize"
-    return "phase1_refine"
+    return "phase1_critic"
+
+def build_phase1_graph() -> StateGraph:
+    """Build Phase 1 subgraph for biological process identification."""
+    builder: StateGraph = StateGraph(ResearchState)
+    builder.add_node("load_context", load_lopez_otin_context)
+    builder.add_node("phase1_plan", phase1_plan)
+    builder.add_node("phase1_research", phase1_research)
+    builder.add_node("phase1_critic", phase1_critic)
+    builder.add_node("phase1_refine", phase1_refine)
+    builder.add_node("phase1_finalize", phase1_finalize)
+
+    builder.set_entry_point("load_context")
+    builder.add_edge("load_context", "phase1_plan")
+    builder.add_edge("phase1_plan", "phase1_research")
+    builder.add_edge("phase1_research", "phase1_critic")
+    builder.add_conditional_edges(
+                            "phase1_critic",
+                            phase1_critic_refine_route,
+                            {"phase1_refine": "phase1_refine", "phase1_finalize": "phase1_finalize"},
+                        )
+    builder.add_conditional_edges(     
+                        "phase1_refine",
+                        phase1_refine_finalize_route,
+                        {
+                            "phase1_critic":   "phase1_critic",
+                            "phase1_finalize": "phase1_finalize",
+                        },
+                    )
+
+    return builder.compile()
+
+
+
+def phase2_research_critic_route(state: dict[str, Any]) -> str:
+    """Route Phase 2 research results: continue loop or go to critic."""
+    iteration = state.get("phase2_research_iteration", 0)
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase2", {}).get("max_research_iterations", 7)
+
+    # If we haven't reached max iterations, continue research loop
+    if iteration > max_iterations:
+        return "phase2_critic"
+    return "phase2_research"
+
+def phase2_critic_refine_route(state: dict[str, Any]) -> str:
+    """Route Phase 2 critic results for critic-refine-only workflow.
+
+    - If critic passes -> END
+    - If critic fails -> phase2_refine
+    """
+    critic_review = state.get("critic_review", {})
+    grade = critic_review.get("grade", "fail")
+    if grade == "pass":
+        return END
+    return "phase2_refine"
+
+def phase2_refine_critic_route(state: dict[str, Any]) -> str:
+    """Check if there is still budget to do critic/refinement and route accordingly"""
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase2", {}).get("max_critic_iterations", 2)
+    current_iteration = state.get("critic_iteration", 0)
+    if current_iteration >= max_iterations:
+        return END
+    return "phase2_critic"
+
+def build_phase2_isolated_graph() -> StateGraph:
+    """Build a graph for Phase 2 seeding, research, review and refinement."""
+    builder: StateGraph = StateGraph(ResearchState)
+    builder.add_node("phase2_research", phase2_research)
+    builder.add_node("phase2_critic", phase2_critic)
+    builder.add_node("phase2_refine", phase2_refine)
+    builder.set_entry_point("phase2_research")
+    builder.add_conditional_edges("phase2_research",phase2_research_critic_route,
+    {"phase2_research": "phase2_research", "phase2_critic": "phase2_critic"},)
+
+    builder.add_conditional_edges("phase2_critic",phase2_critic_refine_route,
+    {END:END, "phase2_refine": "phase2_refine"},)
+
+    builder.add_conditional_edges("phase2_refine",phase2_refine_critic_route,
+    {END:END,"phase2_critic": "phase2_critic"},)
+
+    return builder.compile()
+
+
 
 
 def phase2_route(state: dict[str, Any]) -> str:
@@ -57,36 +151,6 @@ def phase2_route(state: dict[str, Any]) -> str:
 
     return "phase2_refine"  # Address reviewer feedback
 
-
-def should_continue_critic_refine(state: dict[str, Any]) -> str:
-    """Route after refinement: continue to critic or finalize.
-
-    Checks if budget is exhausted. If so, proceeds to map_go_terms.
-    Otherwise, returns to critic for another review.
-    """
-    cfg = state.get("config", {})
-    max_iterations = cfg.get("phase2", {}).get("max_critic_iterations", 2)
-    current_iteration = state.get("critic_iteration", 0)
-
-    if current_iteration >= max_iterations:
-        return "map_go_terms"  # Budget exhausted, proceed to next phase
-
-    return "phase2_critic"  # Continue review cycle
-
-def phase2_research_route(state: dict[str, Any]) -> str:
-    """Route Phase 2 research results: continue loop or go to critic."""
-    iteration = state.get("phase2_research_iteration", 0)
-
-    # Read max_research_iterations from config
-    cfg = state.get("config", {})
-    max_iterations = cfg.get("phase2", {}).get("max_research_iterations", 7)
-
-    # If we haven't reached max iterations, continue research loop
-    if iteration < max_iterations:
-        return "phase2_research"
-    # Otherwise, move to critic
-    return "phase2_critic"
-
 def bp_loop_route(state: dict[str, Any]) -> str:
     """Loop over BPs or exit when the queue is exhausted."""
     index = state.get("current_bp_index", 0)
@@ -94,30 +158,6 @@ def bp_loop_route(state: dict[str, Any]) -> str:
     if index >= len(queue):
         return END
     return "select_bp"
-
-
-def build_phase1_graph() -> StateGraph:
-    """Build Phase 1 subgraph for biological process identification."""
-    builder: StateGraph = StateGraph(ResearchState)
-    builder.add_node("load_context", load_lopez_otin_context)
-    builder.add_node("phase1_plan", phase1_plan)
-    builder.add_node("phase1_research", phase1_research)
-    builder.add_node("phase1_critic", phase1_critic)
-    builder.add_node("phase1_refine", phase1_refine)
-    builder.add_node("phase1_finalize", phase1_finalize)
-
-    builder.set_entry_point("load_context")
-    builder.add_edge("load_context", "phase1_plan")
-    builder.add_edge("phase1_plan", "phase1_research")
-    builder.add_edge("phase1_research", "phase1_critic")
-    builder.add_conditional_edges(
-        "phase1_critic",
-        phase1_route,
-        {"phase1_refine": "phase1_refine", "phase1_finalize": "phase1_finalize"},
-    )
-    builder.add_edge("phase1_refine", "phase1_critic")
-
-    return builder.compile()
 
 
 def build_phase2_graph() -> StateGraph:
@@ -160,6 +200,40 @@ def build_phase2_graph() -> StateGraph:
     return builder.compile()
 
 
+def phase2_seeding_route(state: dict[str, Any]) -> str:
+    """Route for seeding-only graph: end after seeding completes.
+
+    Seeding sets phase2_research_iteration to 1 when done.
+    """
+    iteration = state.get("phase2_research_iteration", 0)
+    if iteration >= 1:
+        return END
+    return "phase2_research"
+
+
+def build_phase2_seeding_graph() -> StateGraph:
+    """Build Phase 2 graph that only does seeding (iteration 0).
+
+    This graph:
+    1. Selects BP
+    2. Runs phase2_research at iteration 0 (which triggers seeding)
+    3. Ends after seeding completes (iteration becomes 1)
+    """
+    builder: StateGraph = StateGraph(ResearchState)
+    builder.add_node("select_bp", select_bp)
+    builder.add_node("phase2_research", phase2_research)
+
+    builder.set_entry_point("select_bp")
+    builder.add_edge("select_bp", "phase2_research")
+    builder.add_conditional_edges(
+        "phase2_research",
+        phase2_seeding_route,
+        {"phase2_research": "phase2_research", END: END},
+    )
+
+    return builder.compile()
+
+
 def phase2_research_only_route(state: dict[str, Any]) -> str:
     """Route for research-only graph: continue loop or end."""
     iteration = state.get("phase2_research_iteration", 0)
@@ -188,17 +262,7 @@ def build_phase2_research_only_graph() -> StateGraph:
     return builder.compile()
 
 
-def phase2_critic_refine_route(state: dict[str, Any]) -> str:
-    """Route Phase 2 critic results for critic-refine-only workflow.
 
-    - If critic passes -> END
-    - If critic fails -> phase2_refine
-    """
-    critic_review = state.get("critic_review", {})
-    grade = critic_review.get("grade", "fail")
-    if grade == "pass":
-        return END
-    return "phase2_refine"
 
 def phase2_refine_continue_route(state: dict[str, Any]) -> str:
     """Route after refinement for critic-refine-only workflow.

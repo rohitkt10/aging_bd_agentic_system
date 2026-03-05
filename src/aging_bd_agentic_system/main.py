@@ -78,6 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase1-vector-db-top-k", type=int, help="Phase 1: Vector DB results per query")
     parser.add_argument("--phase1-pubmed-retmax", type=int, help="Phase 1: PubMed results per query")
     parser.add_argument("--max-iterations", type=int, help="Max refinement iterations")
+    parser.add_argument("--min-processes", type=int, help="Min final processes")
     parser.add_argument("--max-processes", type=int, help="Max final processes")
     parser.add_argument("--summary-max-words", type=int, help="Max words per goal summary")
 
@@ -151,6 +152,7 @@ def _print_config(config: RunConfig) -> None:
     print(f"  phase1_vector_db_top_k: {p1.get('phase1_vector_db_top_k')}")
     print(f"  phase1_pubmed_retmax: {p1.get('phase1_pubmed_retmax')}")
     print(f"  max_iterations: {p1.get('max_iterations')}")
+    print(f"  min_processes: {p1.get('min_processes')}")
     print(f"  max_processes: {p1.get('max_processes')}")
     print(f"  summary_max_words: {p1.get('summary_max_words')}")
 
@@ -231,6 +233,7 @@ def main() -> None:
         phase1_vector_db_top_k=args.phase1_vector_db_top_k,
         phase1_pubmed_retmax=args.phase1_pubmed_retmax,
         max_iterations=args.max_iterations,
+        min_processes=args.min_processes,
         max_processes=args.max_processes,
         summary_max_words=args.summary_max_words,
         max_research_iterations=args.max_research_iterations,

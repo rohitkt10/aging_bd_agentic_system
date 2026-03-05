@@ -440,10 +440,34 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
                             "biological_process": bp_name,
                         })
 
+    # Build refinement record for audit trail
+    old_gene_symbols = {g.get("gene_symbol") for g in genes_found}
+    new_gene_symbols = {g.get("gene_symbol") for g in updated_genes}
+    new_genes_added = new_gene_symbols - old_gene_symbols
+
+    refinement_record = {
+        "iteration": state.get("critic_iteration", 0) + 1,
+        "assessment_rebuttal": assessment.get("rebuttal", "") if "assessment" in dir() else "",
+        "assessment_comments": assessment.get("comments", "") if "assessment" in dir() else "",
+        "queries_executed": {
+            "opengenes": len(opengenes_findings),
+            "pubmed": len(pubmed_findings),
+            "vector_db": len(vectordb_findings),
+        },
+        "genes_before": len(genes_found),
+        "genes_after": len(updated_genes),
+        "new_genes_added": list(new_genes_added),
+        "new_genes_count": len(new_genes_added),
+    }
+
+    refinement_history = state.get("refinement_history", [])
+    refinement_history.append(refinement_record)
+
     print(f"{'='*60}\n")
     return {
         "genes_found": updated_genes,
         "gene_evidence": gene_evidence,
         "state_of_knowledge": json.dumps(state_of_knowledge),
         "critic_iteration": state.get("critic_iteration", 0) + 1,
+        "refinement_history": refinement_history,
     }

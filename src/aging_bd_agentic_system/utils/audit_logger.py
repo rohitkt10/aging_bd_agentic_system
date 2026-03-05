@@ -27,16 +27,14 @@ def log_event(
     record["timestamp"] = datetime.now().isoformat(timespec="seconds")
 
     hallmark = record.get("hallmark", "run")
-    # Sanitize hallmark name for use in directory path
-    safe_name = hallmark.replace(" ", "_").replace("/", "_").replace("\\", "_")
 
     # Determine log directory (priority: log_dir > output_dir > default)
     if log_dir:
         resolved_dir = log_dir
     elif output_dir:
-        resolved_dir = Path(output_dir) / safe_name / "logs"
+        resolved_dir = Path(output_dir) / hallmark / "logs"
     else:
-        resolved_dir = Path("logs") / safe_name
+        resolved_dir = Path("logs") / hallmark
 
     resolved_dir.mkdir(parents=True, exist_ok=True)
 

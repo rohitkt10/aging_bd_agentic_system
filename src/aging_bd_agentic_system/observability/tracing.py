@@ -54,20 +54,13 @@ class TracingCallbackHandler(BaseCallbackHandler):
         """
         super().__init__()
 
-        # Sanitize hallmark name for use in directory path
-        safe_name = ""
-        if hallmark_name:
-            safe_name = (
-                hallmark_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
-            )
-
         # Determine log directory (priority: log_dir > output_dir > default)
         if log_dir:
             self.log_dir = log_dir
-        elif output_dir and safe_name:
-            self.log_dir = Path(output_dir) / safe_name / "logs"
-        elif safe_name:
-            self.log_dir = Path("logs") / safe_name
+        elif output_dir and hallmark_name:
+            self.log_dir = Path(output_dir) / hallmark_name / "logs"
+        elif hallmark_name:
+            self.log_dir = Path("logs") / hallmark_name
         else:
             self.log_dir = log_dir or config.DATA_DIR / "logs"
 

@@ -31,6 +31,7 @@ class Phase1Config:
     phase1_vector_db_top_k: int = 20
     phase1_pubmed_retmax: int = 10
     max_iterations: int = 2
+    min_processes: int = 10
     max_processes: int = 15
     summary_max_words: int = 300
 
@@ -215,6 +216,8 @@ class RunConfig:
             self.phase1.phase1_pubmed_retmax = kwargs["phase1_pubmed_retmax"]
         if kwargs.get("max_iterations") is not None:
             self.phase1.max_iterations = kwargs["max_iterations"]
+        if kwargs.get("min_processes") is not None:
+            self.phase1.min_processes = kwargs["min_processes"]
         if kwargs.get("max_processes") is not None:
             self.phase1.max_processes = kwargs["max_processes"]
         if kwargs.get("summary_max_words") is not None:

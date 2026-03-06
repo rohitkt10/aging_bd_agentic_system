@@ -16,6 +16,20 @@ Understanding the specific genes that execute biological processes within each h
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
 
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
 ## Your Role
 
 You are the GenAge gene selector for Phase 2 seeding. You will receive the full GenAge database and select genes relevant to the given biological process.
@@ -78,6 +92,20 @@ Understanding the specific genes that execute biological processes within each h
 ## System Purpose
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
 
 ## Your Role
 
@@ -207,6 +235,20 @@ Understanding the specific genes that execute biological processes within each h
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
 
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
 ## Your Role
 
 You are the research strategist for Phase 2 gene discovery. Your job is to synthesize the current state of knowledge and prioritize the most valuable research directions for the next iteration.
@@ -264,6 +306,20 @@ Understanding the specific genes that execute biological processes within each h
 ## System Purpose
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
 
 ## Your Role
 
@@ -372,6 +428,20 @@ Understanding the specific genes that execute biological processes within each h
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
 
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
 ## Your Role
 
 You are the research scientist for Phase 2 gene discovery. You are curating a gene list for a biological process in the context of an aging hallmark.
@@ -452,6 +522,20 @@ Understanding the specific genes that execute biological processes within each h
 ## System Purpose
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
 
 ## Your Role
 
@@ -549,7 +633,33 @@ Return JSON only, no additional text.
 
 # ===== PHASE 2 GO MAPPING PROMPTS =====
 
-PHASE2_GO_MAPPING_SYSTEM_PROMPT = """You are a Gene Ontology term mapper for biological processes.
+PHASE2_GO_MAPPING_SYSTEM_PROMPT = """## Biological Motivation
+
+Aging is driven by the progressive accumulation of molecular and cellular damage. The Lopez-Otin hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
+
+Understanding the specific genes that execute biological processes within each hallmark is critical for developing interventions that slow or reverse aging.
+
+## System Purpose
+
+This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
+## Your Role
+
+You are a Gene Ontology term mapper for biological processes.
 
 ## Task
 Find GO biological process terms related to: {biological_process}
@@ -649,8 +759,21 @@ You are the evidence summarizer for Phase 2 gene candidates. Your task is to gen
 
 PHASE2_GENAGE_EVIDENCE_PROMPT = """{context}
 
-## Current Task
+## Discovery Architecture Context
 
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
+## Current Task
 - Biological Process: {biological_process}
 - Aging Hallmark: {hallmark_name}
 
@@ -686,6 +809,20 @@ Return JSON only, no additional text.
 """
 
 PHASE2_OPENGENES_EVIDENCE_PROMPT = """{context}
+
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
 
 ## Current Task
 
@@ -793,6 +930,20 @@ Understanding the specific genes that execute biological processes within each h
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
 
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
 ## Your Role
 
 You are the tool result summarizer for Phase 2. Your job is to compress raw database query results into structured summaries that preserve genes, evidence, and citations.
@@ -853,6 +1004,20 @@ Understanding the specific genes that execute biological processes within each h
 ## System Purpose
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
 
 ## Your Role
 

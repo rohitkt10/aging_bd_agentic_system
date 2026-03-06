@@ -24,6 +24,7 @@ from aging_bd_agentic_system.tools import (
     query_pubmed,
     query_vector_db_batch,
 )
+from aging_bd_agentic_system.agents.phase2_helpers import get_all_biological_processes
 
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parents[3] / ".env")
@@ -47,6 +48,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
     hallmark = state.get("hallmark_name", "")
     cfg = state.get("config", {})
     p2 = cfg.get("phase2", {})
+    all_biological_processes = get_all_biological_processes(cfg.get("output_dir"), hallmark)
 
     # Read config
     refine_opengenes_max_results = p2.get("refine_opengenes_max_results", 15)
@@ -133,6 +135,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
     assessment_user_prompt = REFINEMENT_ASSESSMENT_USER_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         gene_count=len(genes_found),
         scored_genes_json=json.dumps(genes_found, indent=2),
         review_summary=review_data.get("summary", "No summary provided."),
@@ -191,6 +194,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
     summarizer_system = REFINEMENT_RESEARCH_SUMMARIZER_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         scored_genes_json=json.dumps(genes_found, indent=2),
     )
 
@@ -330,6 +334,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
     state_update_prompt = REFINEMENT_STATE_UPDATE_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         review_summary=review_data.get("summary", "No summary provided."),
         review_strengths=json.dumps(review_data.get("strengths", []), indent=2),
         review_weaknesses=json.dumps(review_data.get("weaknesses", []), indent=2),
@@ -407,6 +412,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
     scoring_prompt = PHASE2_SCORING_SYSTEM_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         research_summary=state_of_knowledge.get("summary", "No summary available."),
         gene_evidence=json.dumps(gene_evidence, indent=2),
     )

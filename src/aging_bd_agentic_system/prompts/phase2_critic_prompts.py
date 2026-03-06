@@ -90,6 +90,20 @@ You are reviewing a curated gene list for a biological process in the context of
 **Biological Process**: {biological_process}
 **Aging Hallmark**: {hallmark_name}
 
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
 ## Draft to Review
 
 ### Scored Genes ({gene_count} genes)

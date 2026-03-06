@@ -171,6 +171,20 @@ You have received a review of your gene list. Read it carefully and plan your re
 **Biological Process**: {biological_process}
 **Aging Hallmark**: {hallmark_name}
 
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
 ## Your Current Draft
 
 ### Scored Genes ({gene_count} genes)
@@ -243,6 +257,20 @@ Understanding the specific genes that execute biological processes within each h
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
 
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
+
 ## Your Role
 
 You are the research summarizer for Phase 2 refinement. Your job is to compress raw database query results into structured summaries that preserve genes, evidence, and citations.
@@ -300,6 +328,20 @@ Understanding the specific genes that execute biological processes within each h
 ## System Purpose
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes (Phase 1), then discovers genes associated with each process (Phase 2).
+
+## Discovery Architecture Context
+
+In Phase 1, we identified the following biological processes for this hallmark:
+{all_biological_processes}
+
+We are currently focused on: {biological_process}
+
+Our goal is to discover genes with primary relevance to this specific biological process.
+Genes that are primarily associated with the other BPs listed above should be avoided
+where possible. That said, some overlap across BPs is biologically inevitable and
+acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
+exclude genes that have genuine mechanistic relevance to the current process simply
+because they also appear in other contexts.
 
 ## Your Role
 

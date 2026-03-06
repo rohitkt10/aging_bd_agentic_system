@@ -12,6 +12,44 @@ from typing import Any
 from pdb import set_trace
 
 from aging_bd_agentic_system.llm import get_llm
+
+
+# ===== BIOLOGICAL PROCESSES CONTEXT HELPER =====
+
+def get_all_biological_processes(output_dir: str | Path, hallmark_name: str) -> str:
+    """
+    Read the processes.tsv file and format all biological processes as a bulleted list.
+
+    Args:
+        output_dir: Output directory path (from config)
+        hallmark_name: Name of the aging hallmark
+
+    Returns:
+        Formatted string with all biological processes, or empty string if file not found
+    """
+    processes_file = Path(output_dir) / hallmark_name / "processes.tsv"
+
+    if not processes_file.exists():
+        return f"(Processes file not found at {processes_file})"
+
+    try:
+        with processes_file.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Skip header and extract process names (column 2, 0-indexed column 1)
+        processes = []
+        for line in lines[1:]:  # Skip header
+            parts = line.strip().split("\t")
+            if len(parts) >= 2:
+                rank = parts[0]
+                process_name = parts[1]
+                processes.append(f"{rank}. {process_name}")
+
+        return "\n".join(processes)
+    except Exception as e:
+        return f"(Error reading processes: {e})"
+
+
 from aging_bd_agentic_system.prompts.phase2_prompts import (
     PHASE2_EVIDENCE_CONTEXT,
     PHASE2_GENAGE_EVIDENCE_PROMPT,
@@ -114,14 +152,17 @@ def _get_genage_lookup() -> dict[str, dict]:
 
 # ===== SEEDING FUNCTIONS =====
 
-def select_genage_seed_genes(bp_name: str, hallmark: str, genage_data: str) -> list[str]:
+def select_genage_seed_genes(bp_name: str, hallmark: str, all_biological_processes: str, genage_data: str) -> list[str]:
     """
     Use LLM to select relevant genes from GenAge database.
 
     Args:
         bp_name: Biological process name
         hallmark: Aging hallmark name
+        all_biological_processes: Formatted list of all Phase 1 BPs for this hallmark
         genage_data: Full GenAge CSV data as string
+
+        output_dir: Output directory (needed to get all Biological_processes)
 
     Returns:
         List of gene symbols selected from GenAge
@@ -131,6 +172,7 @@ def select_genage_seed_genes(bp_name: str, hallmark: str, genage_data: str) -> l
     user_prompt = PHASE2_GENAGE_SEED_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         genage_data=genage_data,
     )
 
@@ -154,13 +196,14 @@ def select_genage_seed_genes(bp_name: str, hallmark: str, genage_data: str) -> l
         raise ValueError(f"Failed to select GenAge seed genes: {e}")
 
 
-def generate_opengenes_seed_queries(bp_name: str, hallmark: str) -> list[str]:
+def generate_opengenes_seed_queries(bp_name: str, hallmark: str, all_biological_processes: str) -> list[str]:
     """
     Use LLM to generate search queries for OpenGenes database.
 
     Args:
         bp_name: Biological process name
         hallmark: Aging hallmark name
+        all_biological_processes: Formatted list of all Phase 1 BPs for this hallmark
 
     Returns:
         List of search queries for OpenGenes
@@ -170,6 +213,7 @@ def generate_opengenes_seed_queries(bp_name: str, hallmark: str) -> list[str]:
     user_prompt = PHASE2_OPENGENES_SEED_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
     )
 
     try:
@@ -288,7 +332,7 @@ def normalize_seed_candidates(candidates: list[dict]) -> list[dict]:
     return result
 
 
-def _summarize_evidence_batch(candidates: list[dict], bp_name: str, hallmark: str, batch_type: str) -> dict[str, str]:
+def _summarize_evidence_batch(candidates: list[dict], bp_name: str, hallmark: str, batch_type: str, all_biological_processes: str) -> dict[str, str]:
     """
     Call LLM to summarize evidence for a batch of candidates.
 
@@ -297,6 +341,7 @@ def _summarize_evidence_batch(candidates: list[dict], bp_name: str, hallmark: st
         bp_name: Biological process name
         hallmark: Aging hallmark name
         batch_type: "genage" or "opengenes"
+        all_biological_processes: Formatted list of all Phase 1 BPs for this hallmark
 
     Returns:
         Dict mapping symbol -> evidence (empty on failure)
@@ -313,6 +358,7 @@ def _summarize_evidence_batch(candidates: list[dict], bp_name: str, hallmark: st
             biological_process=bp_name,
             hallmark_name=hallmark,
             genes_json=genes_json,
+            all_biological_processes=all_biological_processes,
         )
     else:  # opengenes
         genes_json = json.dumps(
@@ -324,6 +370,7 @@ def _summarize_evidence_batch(candidates: list[dict], bp_name: str, hallmark: st
             biological_process=bp_name,
             hallmark_name=hallmark,
             genes_json=genes_json,
+            all_biological_processes=all_biological_processes,
         )
 
     try:
@@ -334,7 +381,7 @@ def _summarize_evidence_batch(candidates: list[dict], bp_name: str, hallmark: st
         return {}
 
 
-def summarize_seed_evidence(candidates: list[dict], bp_name: str, hallmark: str) -> list[dict]:
+def summarize_seed_evidence(candidates: list[dict], bp_name: str, hallmark: str,  all_biological_processes: str) -> list[dict]:
     """
     Use LLM to generate evidence summaries for normalized seed candidates.
 
@@ -348,6 +395,7 @@ def summarize_seed_evidence(candidates: list[dict], bp_name: str, hallmark: str)
         candidates: Normalized candidates from normalize_seed_candidates()
         bp_name: Biological process name
         hallmark: Aging hallmark name
+        all_biological_processes: Formatted list of all Phase 1 BPs for this hallmark
 
     Returns:
         Candidates with evidence field populated (raw_opengenes removed)
@@ -366,7 +414,7 @@ def summarize_seed_evidence(candidates: list[dict], bp_name: str, hallmark: str)
             continue
 
         # Initial call
-        batch_evidence = _summarize_evidence_batch(batch, bp_name, hallmark, batch_type)
+        batch_evidence = _summarize_evidence_batch(batch, bp_name, hallmark, batch_type, all_biological_processes)
         evidence_map.update(batch_evidence)
 
         # Check for missing genes, retry once

@@ -15,6 +15,7 @@ from aging_bd_agentic_system.agents.phase2_helpers import (
     _get_genage_lookup,
     _load_genage_csv,
     generate_opengenes_seed_queries,
+    get_all_biological_processes,
     normalize_seed_candidates,
     select_genage_seed_genes,
     summarize_seed_evidence,
@@ -80,7 +81,8 @@ def phase2_seeding(state: dict[str, Any]) -> dict[str, Any]:
     cfg = state.get("config", {})
     p2 = cfg.get("phase2", {})
     opengenes_seed_results_per_query = p2.get("opengenes_seed_results_per_query", 15)
-
+    all_biological_processes = get_all_biological_processes(cfg.get("output_dir"), hallmark)
+    
     print(f"\n{'='*60}")
     print(f"SEEDING: {bp_name}")
     print(f"{'='*60}")
@@ -90,14 +92,19 @@ def phase2_seeding(state: dict[str, Any]) -> dict[str, Any]:
 
     # Step 1: Select genes directly from GenAge using LLM
     print("  Selecting GenAge genes via LLM...")
-    genage_gene_symbols = select_genage_seed_genes(bp_name, hallmark, genage_csv_data)
+    genage_gene_symbols = select_genage_seed_genes(
+                                        bp_name=bp_name, 
+                                        hallmark=hallmark, 
+                                        all_biological_processes=all_biological_processes, 
+                                        genage_data=genage_csv_data
+                                            )
     print(f"{len(genage_gene_symbols)} GenAge genes selected: {genage_gene_symbols}")
 
     # Step 2: Generate queries for OpenGenes using LLM
     print("  Generating OpenGenes queries via LLM...")
-    opengenes_queries = generate_opengenes_seed_queries(bp_name, hallmark)
+    opengenes_queries = generate_opengenes_seed_queries(bp_name, hallmark, all_biological_processes)
     print(f"{len(opengenes_queries)}  OpenGenes queries: {opengenes_queries}")
-
+    
     # Build candidate list
     candidates = []
 
@@ -153,12 +160,13 @@ def phase2_seeding(state: dict[str, Any]) -> dict[str, Any]:
     print(f"    - GenAge only: {genage_only}")
     print(f"    - OpenGenes only: {opengenes_only}")
     print(f"    - Both: {both}")
-
+    
     # Summarize evidence via LLM
     print(f"\n  Summarizing evidence...")
-    candidates = summarize_seed_evidence(candidates, bp_name, hallmark)
+    candidates = summarize_seed_evidence(candidates, bp_name, hallmark, all_biological_processes)
     print(f"  Evidence summarization complete")
     print(f"{'='*60}\n")
+    set_trace()
 
     # Persist seed genes to disk
     bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed
@@ -267,6 +275,13 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     summarize_max_tokens = p2.get("phase2_summarize_max_tokens", 100000)
     min_actions_per_iteration = p2.get("min_actions_per_iteration", 2)
     max_actions_per_iteration = p2.get("max_actions_per_iteration", 4)
+    all_biological_processes = get_all_biological_processes(cfg.get("output_dir"), hallmark)
+
+    # 
+    print("*"*60)
+    print("BIOLOGICAL PROCESSES RECOVERED IN PHASE 1")
+    print("*"*60)
+    print(all_biological_processes)
 
     # Get current iteration
     current_iteration = state.get("phase2_research_iteration", 0)
@@ -340,6 +355,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     synthesize_prompt = PHASE2_SYNTHESIZE_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         current_iteration=current_iteration,
         max_iterations=max_iterations,
         phase=phase.upper(),
@@ -407,6 +423,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     decision_prompt = PHASE2_DECIDE_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         current_iteration=current_iteration,
         max_iterations=max_iterations,
         phase=phase.upper(),
@@ -487,6 +504,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         summarizer_system = PHASE2_TOOL_SUMMARIZER_PROMPT.format(
             biological_process=bp_name,
             hallmark_name=hallmark,
+            all_biological_processes=all_biological_processes,
             current_iteration=current_iteration,
             max_iterations=max_iterations,
             phase=phase.upper(),
@@ -602,6 +620,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     state_update_prompt = PHASE2_STATE_UPDATE_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         current_iteration=current_iteration,
         max_iterations=max_iterations,
         phase=phase.upper(),
@@ -672,6 +691,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         scoring_prompt = PHASE2_SCORING_SYSTEM_PROMPT.format(
             biological_process=bp_name,
             hallmark_name=hallmark,
+            all_biological_processes=all_biological_processes,
             research_summary=state_of_knowledge.get("summary", "No summary available."),
             gene_evidence=json.dumps(gene_evidence, indent=2),
         )
@@ -753,7 +773,12 @@ def map_go_terms(state: dict[str, Any]) -> dict[str, Any]:
     """
     bp_name = state.get("current_bp_name", "").strip()
     hallmark = state.get("hallmark_name")
+    cfg = state.get("config", {})
+    output_dir = cfg.get("output_dir", "outputs")
     max_results = 10  # Fixed max results
+
+    # Get all biological processes for context
+    all_biological_processes = get_all_biological_processes(output_dir, hallmark)
 
     # Query GO terms
     go_results = query_go_terms(query=bp_name, max_results=20)
@@ -777,7 +802,9 @@ def map_go_terms(state: dict[str, Any]) -> dict[str, Any]:
 
     # System prompt with instructions
     system_prompt = PHASE2_GO_MAPPING_SYSTEM_PROMPT.format(
-        biological_process=bp_name, hallmark_name=hallmark
+        biological_process=bp_name,
+        hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
     )
 
     llm = get_llm()

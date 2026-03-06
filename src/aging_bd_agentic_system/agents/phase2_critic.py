@@ -15,6 +15,7 @@ from aging_bd_agentic_system.prompts.phase2_critic_prompts import (
     CRITIC_SYSTEM_PROMPT,
     CRITIC_USER_PROMPT_TEMPLATE,
 )
+from aging_bd_agentic_system.agents.phase2_helpers import get_all_biological_processes
 
 
 def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
@@ -33,6 +34,8 @@ def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
     """
     bp_name = state.get("current_bp_name", "").strip()
     hallmark = state.get("hallmark_name", "")
+    cfg = state.get("config", {})
+    all_biological_processes = get_all_biological_processes(cfg.get("output_dir"), hallmark)
 
     # Get scored genes for this BP
     genes_found = state.get("genes_found", [])
@@ -53,6 +56,7 @@ def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
     user_prompt = CRITIC_USER_PROMPT_TEMPLATE.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
+        all_biological_processes=all_biological_processes,
         gene_count=len(genes_found),
         scored_genes_json=json.dumps(genes_found, indent=2),
         gene_evidence_json=json.dumps(gene_evidence, indent=2),

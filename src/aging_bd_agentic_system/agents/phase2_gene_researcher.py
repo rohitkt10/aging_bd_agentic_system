@@ -166,7 +166,6 @@ def phase2_seeding(state: dict[str, Any]) -> dict[str, Any]:
     candidates = summarize_seed_evidence(candidates, bp_name, hallmark, all_biological_processes)
     print(f"  Evidence summarization complete")
     print(f"{'='*60}\n")
-    set_trace()
 
     # Persist seed genes to disk
     bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed
@@ -277,14 +276,16 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     max_actions_per_iteration = p2.get("max_actions_per_iteration", 4)
     all_biological_processes = get_all_biological_processes(cfg.get("output_dir"), hallmark)
 
-    # 
-    print("*"*60)
-    print("BIOLOGICAL PROCESSES RECOVERED IN PHASE 1")
-    print("*"*60)
-    print(all_biological_processes)
+
+    
 
     # Get current iteration
     current_iteration = state.get("phase2_research_iteration", 0)
+    if current_iteration==0:
+        print("*"*60)
+        print("BIOLOGICAL PROCESSES RECOVERED IN PHASE 1")
+        print("*"*60)
+        print(all_biological_processes)
     print(f"\n=== Phase 2 Research Iteration {current_iteration}/{max_iterations} ===")
 
     # Iteration 0: Seeding
@@ -315,30 +316,31 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     
     
     # Determine research phase based on iteration (dynamic boundaries)
-    exploration_end = max(1, int(max_iterations * 0.3))
-    rabbit_hole_end = max(exploration_end + 1, int(max_iterations * 0.6))
-    if current_iteration <= exploration_end:
+    if current_iteration == max_iterations:
+        phase = "finalization"
+        guidance = (
+            "Synthesize all findings and prepare for gene scoring and final gene list draft production."
+        )
+    elif current_iteration <= max_iterations // 3:
         phase = "exploration"
         guidance = (
             "Cast a wide net. Query all 3 sources with broad terms. "
             "Note what looks interesting."
         )
-    elif current_iteration <= rabbit_hole_end:
+    elif current_iteration <= 2 * (max_iterations // 3):
         phase = "rabbit_hole"
         guidance = (
             "Follow interesting leads you found. Search for specific genes "
             "or terms that keep appearing."
         )
-    elif current_iteration < max_iterations:
+    else:
         phase = "exploitation"
         guidance = "Deepen your findings. Fill gaps in weak evidence. Cross-reference."
-    else:
-        phase = "finalization"
-        guidance = (
-            "Synthesize all findings. Score genes 1-10. "
-            "Return only genes with score 5+."
-        )
-
+    print("-"*60)
+    print(f"Reseach phase: {phase}")
+    print(f"Research guidance: {guidance}")
+    print("-"*60)
+    
     # Build seed genes summary (genes + evidence from seeding)
     seed_genes = research_data.get("initial_database_genes", [])
     seed_genes_summary = json.dumps(
@@ -436,7 +438,7 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         min_vectordb=min_actions_per_iteration,
         max_vectordb=max_actions_per_iteration,
     )
-
+    
     print(f"Deciding on research tool calls..")
     decisions = llm.invoke_structured(decision_prompt, schema=decision_schema)
     

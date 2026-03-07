@@ -183,7 +183,10 @@ Genes that are primarily associated with the other BPs listed above should be av
 where possible. That said, some overlap across BPs is biologically inevitable and
 acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
 exclude genes that have genuine mechanistic relevance to the current process simply
-because they also appear in other contexts.
+because they also appear in other contexts. In the final aggregation across biological 
+processes we anticipate there will many genes tied to single BPs and many that are 
+shared across 2 or more BPs. Some genes may even have significant overlap across BPs 
+which we will essentially label as "core" genes for the hallmark. 
 
 ## Your Current Draft
 
@@ -269,7 +272,10 @@ Genes that are primarily associated with the other BPs listed above should be av
 where possible. That said, some overlap across BPs is biologically inevitable and
 acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
 exclude genes that have genuine mechanistic relevance to the current process simply
-because they also appear in other contexts.
+because they also appear in other contexts. In the final aggregation across biological 
+processes we anticipate there will many genes tied to single BPs and many that are 
+shared across 2 or more BPs. Some genes may even have significant overlap across BPs 
+which we will essentially label as "core" genes for the hallmark. 
 
 ## Your Role
 
@@ -341,7 +347,10 @@ Genes that are primarily associated with the other BPs listed above should be av
 where possible. That said, some overlap across BPs is biologically inevitable and
 acceptable — the goal is intelligent curation, not strict exclusivity. Do not artificially
 exclude genes that have genuine mechanistic relevance to the current process simply
-because they also appear in other contexts.
+because they also appear in other contexts. In the final aggregation across biological 
+processes we anticipate there will many genes tied to single BPs and many that are 
+shared across 2 or more BPs. Some genes may even have significant overlap across BPs 
+which we will essentially label as "core" genes for the hallmark. 
 
 ## Your Role
 

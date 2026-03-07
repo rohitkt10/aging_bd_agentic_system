@@ -30,7 +30,13 @@ You are the biological process identifier for Phase 1. Given research evidence a
 
 ## Task
 
-Identify {min_processes}-{max_processes} biological processes that comprise the hallmark: {hallmark_name}
+Identify {min_processes}-{max_processes} biological processes that comprise the hallmark: {hallmark_name}.
+We want biological processes that best characterize the core mechanisms of {hallmark_name}. 
+For each candidate process, reason across two layers: 
+(1) how relevant is this process to aging biology broadly, and 
+(2) how central is it to the defining mechanisms of {hallmark_name} specifically — 
+prioritizing processes that score highly on both. 
+Overlap with any other hallmarks is natural and acceptable where biologically justified.
 
 ## Process Criteria
 - Each process must be mechanistically distinct (no overlap)
@@ -72,6 +78,33 @@ PHASE1_REFINE_SYSTEM_PROMPT = """## Biological Motivation
 Aging is driven by the progressive accumulation of molecular and cellular damage. The López-Otín hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
 
 Understanding the specific molecular mechanisms within each hallmark is critical for developing interventions that slow or reverse aging. This requires identifying the discrete biological processes that comprise each hallmark, then discovering the genes that execute these processes.
+
+## Hallmarks of Aging — Overview
+
+Aging is driven by 12 interconnected hallmarks, grouped into three tiers. 
+Primary hallmarks reflect direct molecular damage: 
+(1) Genomic instability — accumulation of nuclear/mitochondrial DNA damage, mutations, chromosomal aberrations, and defective DNA repair; 
+(2) Telomere attrition — progressive shortening of telomeres driving senescence and genomic instability, 
+regulated by telomerase and shelterin components; 
+(3) Epigenetic alterations — age-associated shifts in DNA methylation, 
+histone modifications, chromatin remodeling, and non-coding RNA regulation, 
+including retrotransposon derepression; (4) Loss of proteostasis — failure of chaperone, 
+UPR, and proteasomal/lysosomal degradation systems leading to protein aggregation; 
+(5) Disabled macroautophagy — decline in autophagic flux impairing clearance of damaged organelles, lipids, and cytosolic nucleic acids beyond proteostasis alone.
+Antagonistic hallmarks represent damage responses that become maladaptive with age: 
+(6) Deregulated nutrient-sensing — dysregulation of insulin/IGF1, mTOR, AMPK, and 
+sirtuin pathways that shift from anabolic to pro-aging states; 
+(7) Mitochondrial dysfunction — deterioration of OXPHOS, mitochondrial dynamics, 
+and mitophagy, accompanied by increased ROS and inflammatory signaling; 
+(8) Cellular senescence — irreversible cell cycle arrest with a pro-inflammatory 
+SASP that systemically propagates aging signals.
+Integrative hallmarks emerge from accumulated upstream damage and set the organismal 
+pace of aging: (9) Stem cell exhaustion — loss of regenerative capacity across tissues; 
+(10) Altered intercellular communication — disruption of hormonal, neural, and paracrine signaling, including pro-aging circulating factors and ECM remodeling; (11) Chronic inflammation — sustained low-grade inflammaging driven by all upstream hallmarks, measurable by cytokine profiles; (12) Dysbiosis — age-associated loss of gut microbiome homeostasis with systemic metabolic and immune consequences.
+Hallmarks share mechanisms — senescence drives SASP and inflammation; 
+mitochondrial dysfunction feeds both inflammation and proteostasis failure; 
+epigenetic clocks capture multi-hallmark deterioration. 
+Overlap between hallmarks is expected and biologically meaningful.
 
 ## System Purpose
 
@@ -221,6 +254,33 @@ Aging is driven by the progressive accumulation of molecular and cellular damage
 
 Understanding the specific molecular mechanisms within each hallmark is critical for developing interventions that slow or reverse aging. This requires identifying the discrete biological processes that comprise each hallmark, then discovering the genes that execute these processes.
 
+## Hallmarks of Aging — Overview
+
+Aging is driven by 12 interconnected hallmarks, grouped into three tiers. 
+Primary hallmarks reflect direct molecular damage: 
+(1) Genomic instability — accumulation of nuclear/mitochondrial DNA damage, mutations, chromosomal aberrations, and defective DNA repair; 
+(2) Telomere attrition — progressive shortening of telomeres driving senescence and genomic instability, 
+regulated by telomerase and shelterin components; 
+(3) Epigenetic alterations — age-associated shifts in DNA methylation, 
+histone modifications, chromatin remodeling, and non-coding RNA regulation, 
+including retrotransposon derepression; (4) Loss of proteostasis — failure of chaperone, 
+UPR, and proteasomal/lysosomal degradation systems leading to protein aggregation; 
+(5) Disabled macroautophagy — decline in autophagic flux impairing clearance of damaged organelles, lipids, and cytosolic nucleic acids beyond proteostasis alone.
+Antagonistic hallmarks represent damage responses that become maladaptive with age: 
+(6) Deregulated nutrient-sensing — dysregulation of insulin/IGF1, mTOR, AMPK, and 
+sirtuin pathways that shift from anabolic to pro-aging states; 
+(7) Mitochondrial dysfunction — deterioration of OXPHOS, mitochondrial dynamics, 
+and mitophagy, accompanied by increased ROS and inflammatory signaling; 
+(8) Cellular senescence — irreversible cell cycle arrest with a pro-inflammatory 
+SASP that systemically propagates aging signals.
+Integrative hallmarks emerge from accumulated upstream damage and set the organismal 
+pace of aging: (9) Stem cell exhaustion — loss of regenerative capacity across tissues; 
+(10) Altered intercellular communication — disruption of hormonal, neural, and paracrine signaling, including pro-aging circulating factors and ECM remodeling; (11) Chronic inflammation — sustained low-grade inflammaging driven by all upstream hallmarks, measurable by cytokine profiles; (12) Dysbiosis — age-associated loss of gut microbiome homeostasis with systemic metabolic and immune consequences.
+Hallmarks share mechanisms — senescence drives SASP and inflammation; 
+mitochondrial dysfunction feeds both inflammation and proteostasis failure; 
+epigenetic clocks capture multi-hallmark deterioration. 
+Overlap between hallmarks is expected and biologically meaningful.
+
 ## System Purpose
 
 This system automates gene discovery for aging biology. Given a hallmark, it identifies underlying biological processes, then discovers genes associated with each process.
@@ -247,7 +307,7 @@ Phase 2 will use these processes to discover 300-500 genes. Poor process definit
 
 ## Goal
 
-{min_processes}-{max_processes} high-quality, mechanistically distinct processes with solid evidence."""
+{min_processes}-{max_processes} high-quality, mechanistically distinct processes with solid evidence, anchored in the defining mechanisms of the hallmark while allowing biologically justified overlap with other hallmarks."""
 
 PHASE1_CRITIC_UNSTRUCTURED_PROMPT = """## Processes to Review for Hallmark: {hallmark_name}
 
@@ -262,7 +322,8 @@ Write a brief critique (~150 words). Keep in mind that our overall goal is to ob
 
 Consider:
 - Are there obvious gaps or missing themes?
-- Is there redundancy or overlap?
+- Are processes anchored in the defining mechanisms of this hallmark, or are they too generic?
+- Where overlap with other hallmarks exists, is it biologically justified rather than incidental?
 - Is evidence quality adequate?
 - Are these mechanistic processes (not outcomes)?
 - Current count vs. target ({min_processes}-{max_processes})?
@@ -330,6 +391,33 @@ PHASE1_SUMMARY_SYSTEM_PROMPT = """## Biological Motivation
 Aging is driven by the progressive accumulation of molecular and cellular damage. The López-Otín hallmarks of aging framework (Cell 2023) identifies 12 categories of biological decline that underlie aging across species: genomic instability, telomere attrition, epigenetic alterations, loss of proteostasis, deregulated nutrient sensing, mitochondrial dysfunction, cellular senescence, stem cell exhaustion, altered intercellular communication, chronic inflammation, dysbiosis, and disabled macroautophagy.
 
 Understanding the specific molecular mechanisms within each hallmark is critical for developing interventions that slow or reverse aging. This requires identifying the discrete biological processes that comprise each hallmark, then discovering the genes that execute these processes.
+
+## Hallmarks of Aging — Overview
+
+Aging is driven by 12 interconnected hallmarks, grouped into three tiers. 
+Primary hallmarks reflect direct molecular damage: 
+(1) Genomic instability — accumulation of nuclear/mitochondrial DNA damage, mutations, chromosomal aberrations, and defective DNA repair; 
+(2) Telomere attrition — progressive shortening of telomeres driving senescence and genomic instability, 
+regulated by telomerase and shelterin components; 
+(3) Epigenetic alterations — age-associated shifts in DNA methylation, 
+histone modifications, chromatin remodeling, and non-coding RNA regulation, 
+including retrotransposon derepression; (4) Loss of proteostasis — failure of chaperone, 
+UPR, and proteasomal/lysosomal degradation systems leading to protein aggregation; 
+(5) Disabled macroautophagy — decline in autophagic flux impairing clearance of damaged organelles, lipids, and cytosolic nucleic acids beyond proteostasis alone.
+Antagonistic hallmarks represent damage responses that become maladaptive with age: 
+(6) Deregulated nutrient-sensing — dysregulation of insulin/IGF1, mTOR, AMPK, and 
+sirtuin pathways that shift from anabolic to pro-aging states; 
+(7) Mitochondrial dysfunction — deterioration of OXPHOS, mitochondrial dynamics, 
+and mitophagy, accompanied by increased ROS and inflammatory signaling; 
+(8) Cellular senescence — irreversible cell cycle arrest with a pro-inflammatory 
+SASP that systemically propagates aging signals.
+Integrative hallmarks emerge from accumulated upstream damage and set the organismal 
+pace of aging: (9) Stem cell exhaustion — loss of regenerative capacity across tissues; 
+(10) Altered intercellular communication — disruption of hormonal, neural, and paracrine signaling, including pro-aging circulating factors and ECM remodeling; (11) Chronic inflammation — sustained low-grade inflammaging driven by all upstream hallmarks, measurable by cytokine profiles; (12) Dysbiosis — age-associated loss of gut microbiome homeostasis with systemic metabolic and immune consequences.
+Hallmarks share mechanisms — senescence drives SASP and inflammation; 
+mitochondrial dysfunction feeds both inflammation and proteostasis failure; 
+epigenetic clocks capture multi-hallmark deterioration. 
+Overlap between hallmarks is expected and biologically meaningful.
 
 ## System Overview
 This system automates the curation of aging-related gene lists, replacing manual literature review workflows. It is designed to produce comprehensive, well-documented outputs suitable for downstream biological analysis and experimental validation.

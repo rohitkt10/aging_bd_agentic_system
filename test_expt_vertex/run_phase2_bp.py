@@ -164,7 +164,7 @@ def main() -> int:
         "config": config.to_dict(),
         "biological_processes": saved_state.get("biological_processes", []),
         "bp_queue": [bp_name],
-        "current_bp_index": 0,
+        "current_bp_index": args.bp_rank - 1,
         "current_bp_name": bp_name,
         "phase2_research_iteration": 0,  # Start at 0 to trigger seeding
         "phase2_critic_iteration": 0,

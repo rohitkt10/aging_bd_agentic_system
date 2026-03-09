@@ -1,0 +1,46 @@
+# Test experiment configuration for SLURM-based end-to-end smoke testing
+#
+# Usage:
+#   Phase 1: python test_expt/run_phase1.py
+#   Phase 2: python test_expt/run_phase2_bp.py --bp-rank 1
+#
+# Outputs go to: outputs/test_expt/<hallmark>/
+
+hallmark: "genomic instability"
+output_dir: "outputs/test_expt_vertex"
+
+llm:
+  provider: vertex
+  model: gemini-3-flash-preview
+  temperature: 0.5
+  vertex_location: global
+  model_high: gemini-3-pro-preview
+
+phase1:
+  min_research_goals: 3
+  max_research_goals: 5
+  phase1_vector_db_top_k: 5
+  phase1_pubmed_retmax: 5
+  max_iterations: 2
+  min_processes: 10
+  max_processes: 15
+
+phase2:
+  # Research loop
+  max_research_iterations: 4
+  min_actions_per_iteration: 5  
+  max_actions_per_iteration: 7  
+  
+  # Seeding
+  genage_seed_max_results: 10
+  opengenes_seed_results_per_query: 15
+
+  # Tool limits
+  phase2_vector_db_top_k: 5
+  phase2_pubmed_retmax: 5
+
+  # Critic-refine loop settings
+  max_critic_iterations: 2
+  refine_opengenes_max_results: 3
+  refine_pubmed_max_results: 7   
+  refine_vector_db_top_k: 7      

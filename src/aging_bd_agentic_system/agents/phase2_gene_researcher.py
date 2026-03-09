@@ -634,9 +634,33 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         vectordb_summary=json.dumps(vectordb_summary, indent=2) if vectordb_summary else "{}",
         gene_evidence_subset=json.dumps(gene_evidence_subset, indent=2),
     )
-    
-    with llm.high_tier():
-        state_update = llm.invoke_structured(state_update_prompt, schema=state_update_schema)
+    llm.set_tier("high")
+    try:
+        state_update = llm.invoke_structured(
+                                state_update_prompt, 
+                                schema=state_update_schema
+                                            )
+        if state_update is None:
+            raise ValueError("Structured output returned None")
+    except Exception as e:
+        print(f"State update structured invoke failed at iteration {current_iteration}. Retrying once.")
+        try:
+            state_update = llm.invoke_structured(
+                                    state_update_prompt, 
+                                    schema=state_update_schema
+                                                )
+            if state_update is None:
+                raise ValueError("Structured output returned None on retry")
+        except Exception as retry_e:
+            print(f"State update structured invoke failed again at iteration {current_iteration}. Retaining state of knowledge as is.")
+            state_update = {
+                    "new_candidate_genes": [],
+                    "new_citations": [],
+                    "summary": state_of_knowledge.get("summary", "") + f"\n[Note] Iteration {current_iteration}: state update failed after retry; no update applied.",
+                    "gene_evidence_updates": {},
+                        }
+    llm.set_tier("low")
+
 
     # Apply updates to state_of_knowledge
     new_genes = state_update.get("new_candidate_genes", [])
@@ -648,12 +672,10 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     if new_citations:
         state_of_knowledge["citations"].extend(new_citations)
         state_of_knowledge["citations"] = list(set(state_of_knowledge["citations"]))
-
     state_of_knowledge["summary"] = state_update.get("summary", "")
 
     # Apply updates to gene_evidence
     gene_evidence_updates = state_update.get("gene_evidence_updates", {})
-    
     for gene, update in gene_evidence_updates.items():
         if not isinstance(update, dict):
             print(f"  Warning: gene_evidence_updates[{gene}] is {type(update).__name__}, skipping")
@@ -676,7 +698,6 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
                 gene_evidence[gene][src_lower] = True
 
     print(f"  Updated state: {len(new_genes)} new genes, {len(new_citations)} new citations")
-
 
     # Update research data
     research_data["research_findings"].extend(new_findings)

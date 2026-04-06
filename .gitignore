@@ -42,6 +42,9 @@ test-reports/
 # Jupyter/Notebook
 .ipynb_checkpoints/
 
+# Claude Code
+.claude/
+
 # IDE/editor
 .vscode/
 .idea/

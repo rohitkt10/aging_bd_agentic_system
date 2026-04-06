@@ -177,14 +177,16 @@ def select_genage_seed_genes(bp_name: str, hallmark: str, all_biological_process
     )
 
     try:
-        result = llm.invoke_structured(
-            user_prompt,
-            schema=GENAGE_SEED_SCHEMA,
-        )
+        with llm.call(model="low", temp="low"):
+            result = llm.invoke_structured(
+                user_prompt,
+                schema=GENAGE_SEED_SCHEMA,
+            )
         return result.get("genage_genes", [])
     except Exception as e:
         print(f"GenAge seed structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(user_prompt)
+        with llm.call(model="low", temp="low"):
+            response = llm.invoke(user_prompt)
         try:
             json_start = response.find("{")
             json_end = response.rfind("}") + 1
@@ -217,14 +219,16 @@ def generate_opengenes_seed_queries(bp_name: str, hallmark: str, all_biological_
     )
 
     try:
-        result = llm.invoke_structured(
-            user_prompt,
-            schema=OPENGENES_SEED_SCHEMA,
-        )
+        with llm.call(model="low", temp="low"):
+            result = llm.invoke_structured(
+                user_prompt,
+                schema=OPENGENES_SEED_SCHEMA,
+            )
         return result.get("opengenes_queries", [])
     except Exception as e:
         print(f"OpenGenes seed structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(user_prompt)
+        with llm.call(model="low", temp="low"):
+            response = llm.invoke(user_prompt)
         try:
             json_start = response.find("{")
             json_end = response.rfind("}") + 1
@@ -374,7 +378,8 @@ def _summarize_evidence_batch(candidates: list[dict], bp_name: str, hallmark: st
         )
 
     try:
-        results = llm.invoke_structured(prompt, schema=EVIDENCE_SUMMARY_SCHEMA)
+        with llm.call(model="low", temp="low"):
+            results = llm.invoke_structured(prompt, schema=EVIDENCE_SUMMARY_SCHEMA)
         return {r["symbol"]: r["evidence"] for r in results.get("summaries", [])}
     except Exception as e:
         print(f"  {batch_type} summarization failed: {e}")

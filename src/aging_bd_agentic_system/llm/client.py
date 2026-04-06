@@ -1,28 +1,16 @@
 """
 LLM client singleton for agent use.
 
-Supports two-tier model system:
-- Low tier (default): Cheaper/faster model for most tasks
-- High tier: More capable model for complex tasks
+Supports two independent axes per call:
+- model tier: "low" (cheap/fast) or "high" (capable)
+- temp tier: "low", "mid", or "high"
 
-Usage:
-    from aging_bd_agentic_system.llm import get_llm, init_llm
+Both axes are set together via the call() context manager:
 
-    # Initialize with config (call once at startup)
-    init_llm(config.llm)
+    with llm.call(model="high", temp="low"):
+        result = llm.invoke_structured(scoring_prompt, schema=schema)
 
-    # Get the singleton client (uses low tier by default)
-    llm = get_llm()
-    response = llm.invoke("What are biological processes?")
-
-    # Use high tier for complex tasks
-    with llm.high_tier():
-        result = llm.invoke(complex_prompt)
-
-    # Or explicit set/reset
-    llm.set_tier("high")
-    result = llm.invoke(complex_prompt)
-    llm.set_tier("low")
+Outside a context manager, defaults to model="low", temp="mid".
 """
 
 from __future__ import annotations
@@ -35,41 +23,68 @@ from aging_bd_agentic_system.config import LLMConfig
 
 from .providers import LLMProvider, OpenAIProvider, VertexGeminiProvider
 
+_DEFAULT_MODEL_TIER = "low"
+_DEFAULT_TEMP_TIER = "mid"
+
 
 class LLMClient:
     """
-    Main LLM client with two-tier model support.
+    LLM client with independent model-tier and temp-tier axes.
 
-    Holds two providers (low/high tier) and allows switching between them.
-    Low tier is used by default for most tasks.
+    Use the call() context manager to set both axes for each LLM call.
+    Resets to defaults (model=low, temp=mid) on context exit.
     """
 
     def __init__(self, config: LLMConfig | None = None) -> None:
-        """
-        Initialize LLM client from config.
-
-        Args:
-            config: LLMConfig with provider, model, model_low, model_high, etc.
-                    If None, uses defaults from LLMConfig().
-
-        Raises:
-            ValueError: If required config variables are not set.
-        """
         self.config = config or LLMConfig()
-        self._current_tier: str = "low"
-
-        # Lazy-init providers on first access
+        self._model_tier: str = _DEFAULT_MODEL_TIER
+        self._temp_tier: str = _DEFAULT_TEMP_TIER
         self._providers: dict[str, LLMProvider | None] = {"low": None, "high": None}
 
+    # ------------------------------------------------------------------
+    # Context manager — primary interface
+    # ------------------------------------------------------------------
+
+    @contextmanager
+    def call(self, *, model: str = _DEFAULT_MODEL_TIER, temp: str = _DEFAULT_TEMP_TIER) -> Generator[None, None, None]:
+        """
+        Context manager that sets model tier and temp tier for the enclosed calls.
+        Resets both axes to their previous values on exit.
+
+        Args:
+            model: "low" or "high"
+            temp:  "low", "mid", or "high"
+
+        Usage:
+            with llm.call(model="high", temp="low"):
+                result = llm.invoke_structured(scoring_prompt, schema=schema)
+        """
+        if model not in ("low", "high"):
+            raise ValueError(f"Invalid model tier: {model!r}. Must be 'low' or 'high'.")
+        if temp not in ("low", "mid", "high"):
+            raise ValueError(f"Invalid temp tier: {temp!r}. Must be 'low', 'mid', or 'high'.")
+
+        prev_model = self._model_tier
+        prev_temp = self._temp_tier
+        self._model_tier = model
+        self._temp_tier = temp
+        try:
+            yield
+        finally:
+            self._model_tier = prev_model
+            self._temp_tier = prev_temp
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
     def _get_or_init_provider(self, tier: str) -> LLMProvider:
-        """Get provider for tier, initializing lazily if needed."""
         if self._providers[tier] is None:
             model = self.config.get_model_low() if tier == "low" else self.config.get_model_high()
             self._providers[tier] = self._init_provider(model)
         return self._providers[tier]
 
     def _init_provider(self, model: str) -> LLMProvider:
-        """Initialize a provider with specific model."""
         if self.config.provider == "openai":
             return self._init_openai(model)
         elif self.config.provider == "vertex":
@@ -80,14 +95,12 @@ class LLMClient:
             )
 
     def _init_vertex(self, model: str) -> LLMProvider:
-        """Initialize Vertex AI Gemini provider with specific model."""
         project_id = os.environ.get("VERTEX_PROJECT_ID")
         if not project_id:
             raise ValueError(
                 "VERTEX_PROJECT_ID environment variable must be set for Vertex AI. "
                 "Add it to your .env file."
             )
-
         return VertexGeminiProvider(
             project_id=project_id,
             location=self.config.vertex_location,
@@ -97,14 +110,12 @@ class LLMClient:
         )
 
     def _init_openai(self, model: str) -> LLMProvider:
-        """Initialize OpenAI provider with specific model."""
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise ValueError(
                 "OPENAI_API_KEY environment variable must be set for OpenAI. "
                 "Add it to your .env file."
             )
-
         return OpenAIProvider(
             api_key=api_key,
             model=model,
@@ -114,57 +125,31 @@ class LLMClient:
         )
 
     @property
-    def provider(self) -> LLMProvider:
-        """Get current active provider based on tier."""
-        return self._get_or_init_provider(self._current_tier)
+    def _current_provider(self) -> LLMProvider:
+        return self._get_or_init_provider(self._model_tier)
 
-    def set_tier(self, tier: str) -> None:
-        """
-        Switch between 'low' and 'high' model tiers.
+    @property
+    def _current_temperature(self) -> float:
+        if self._temp_tier == "low":
+            return self.config.get_temperature_low()
+        elif self._temp_tier == "mid":
+            return self.config.get_temperature_mid()
+        else:
+            return self.config.get_temperature_high()
 
-        Args:
-            tier: 'low' for cheap/fast model, 'high' for capable model.
-
-        Raises:
-            ValueError: If tier is not 'low' or 'high'.
-        """
-        if tier not in ("low", "high"):
-            raise ValueError(f"Invalid tier: {tier}. Must be 'low' or 'high'.")
-        self._current_tier = tier
-
-    @contextmanager
-    def high_tier(self) -> Generator[None, None, None]:
-        """
-        Context manager for temporary high-tier usage.
-
-        Automatically resets to previous tier on exit.
-
-        Usage:
-            with llm.high_tier():
-                result = llm.invoke(complex_prompt)
-        """
-        prev = self._current_tier
-        self.set_tier("high")
-        try:
-            yield
-        finally:
-            self.set_tier(prev)
+    # ------------------------------------------------------------------
+    # Public invoke methods
+    # ------------------------------------------------------------------
 
     def invoke(
         self, prompt: str, *, system_prompt: str | None = None, **kwargs: Any
     ) -> str:
-        """
-        Invoke the LLM with a text prompt.
-
-        Args:
-            prompt: The user prompt to send
-            system_prompt: Optional system prompt with instructions
-            **kwargs: Override parameters (temperature, max_tokens, etc.)
-
-        Returns:
-            LLM response text
-        """
-        return self.provider.invoke(prompt, system_prompt=system_prompt, **kwargs)
+        return self._current_provider.invoke(
+            prompt,
+            system_prompt=system_prompt,
+            temperature=self._current_temperature,
+            **kwargs,
+        )
 
     def invoke_structured(
         self,
@@ -174,20 +159,12 @@ class LLMClient:
         system_prompt: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """
-        Invoke the LLM with structured output.
-
-        Args:
-            prompt: The user prompt to send
-            schema: Expected output schema (dict with type hints)
-            system_prompt: Optional system prompt with instructions
-            **kwargs: Override parameters
-
-        Returns:
-            LLM response as dict matching schema
-        """
-        return self.provider.invoke_structured(
-            prompt, schema, system_prompt=system_prompt, **kwargs
+        return self._current_provider.invoke_structured(
+            prompt,
+            schema,
+            system_prompt=system_prompt,
+            temperature=self._current_temperature,
+            **kwargs,
         )
 
 
@@ -196,32 +173,14 @@ _global_client: LLMClient | None = None
 
 
 def init_llm(config: LLMConfig) -> LLMClient:
-    """
-    Initialize the global LLM client with config.
-
-    Must be called once at startup before get_llm() is used.
-
-    Args:
-        config: LLMConfig with provider, model, temperature, etc.
-
-    Returns:
-        The initialized LLMClient
-    """
+    """Initialize the global LLM client. Call once at startup."""
     global _global_client
     _global_client = LLMClient(config)
     return _global_client
 
 
 def get_llm() -> LLMClient:
-    """
-    Get the global LLM client instance.
-
-    Returns:
-        The singleton LLMClient
-
-    Raises:
-        ValueError: If required environment variables are not set
-    """
+    """Get the global LLM client instance."""
     global _global_client
     if _global_client is None:
         _global_client = LLMClient()
@@ -229,10 +188,6 @@ def get_llm() -> LLMClient:
 
 
 def reset_llm() -> None:
-    """
-    Reset the global LLM client.
-
-    Useful for testing or when config changes.
-    """
+    """Reset the global LLM client. Useful for testing."""
     global _global_client
     _global_client = None

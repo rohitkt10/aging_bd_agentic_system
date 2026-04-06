@@ -228,19 +228,21 @@ def _summarize_goal_results(
         results=corpus_text,
         max_words=max_words,
     )
-    
+
     print(f"*GOAL*: {goal}")
     print(f"**Summarizing local literature search results...")
     try:
-        corpus_result = llm.invoke_structured(corpus_prompt, schema=GOAL_SUMMARY_SCHEMA)
+        with llm.call(model="low", temp="low"):
+            corpus_result = llm.invoke_structured(corpus_prompt, schema=GOAL_SUMMARY_SCHEMA)
     except Exception as e:
         print(f"Corpus structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(corpus_prompt)
+        with llm.call(model="low", temp="low"):
+            response = llm.invoke(corpus_prompt)
         corpus_result = _extract_json_from_response(response)
 
     # Summarize PubMed results
     print(f"**Summarizing PubMed search results...\n")
-    
+
     pubmed_prompt = PHASE1_PUBMED_SUMMARY_PROMPT.format(
         system_prompt=system_prompt,
         goal=goal,
@@ -249,10 +251,12 @@ def _summarize_goal_results(
         max_words=max_words,
     )
     try:
-        pubmed_result = llm.invoke_structured(pubmed_prompt, schema=GOAL_SUMMARY_SCHEMA)
+        with llm.call(model="low", temp="low"):
+            pubmed_result = llm.invoke_structured(pubmed_prompt, schema=GOAL_SUMMARY_SCHEMA)
     except Exception as e:
         print(f"PubMed structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(pubmed_prompt)
+        with llm.call(model="low", temp="low"):
+            response = llm.invoke(pubmed_prompt)
         pubmed_result = _extract_json_from_response(response)
     
     # Combine results into expected format
@@ -327,20 +331,17 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
                     """
 
     llm = get_llm()
-    print("")
-    llm.set_tier("high")
     print(f"Using model id: {llm.config.get_model_high()} for planning...")
     try:
-        plan = llm.invoke_structured(
-            user_prompt, schema=RESEARCH_PLAN_SCHEMA, system_prompt=system_prompt
-        )
+        with llm.call(model="high", temp="high"):
+            plan = llm.invoke_structured(
+                user_prompt, schema=RESEARCH_PLAN_SCHEMA, system_prompt=system_prompt
+            )
     except Exception as e:
-        # Fallback: try to parse JSON from text response
         print(f"Structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(user_prompt, system_prompt=system_prompt)
+        with llm.call(model="high", temp="high"):
+            response = llm.invoke(user_prompt, system_prompt=system_prompt)
         plan = _extract_json_from_response(response)
-    llm.set_tier("low")
-    print(f"Switching to model id: {llm.config.get_model_low()} for research...")
     return {"phase1_plan": plan}
 
 def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
@@ -538,46 +539,41 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
 
     # === CALL LLM ===
     print("[phase1_research] Synthesize search results...")
-    
-    print(f"Switching to high tier model for overall synthesis...")
-    llm.set_tier("high")
     try:
-        result = llm.invoke_structured(
-            user_context,
-            schema=BIOLOGICAL_PROCESS_SCHEMA,
-            system_prompt=system_prompt,
-        )
-
-        # Validate result follows schema (not returning schema itself)
-        processes = result.get("processes")
-        if not isinstance(processes, list) or (processes and "type" in processes):
-            # Schema mismatch - 1 retry to fix
-            print("Schema mismatch detected, retrying with fix prompt...")
-            fix_prompt = f"""The following JSON has a schema mismatch. Expected "processes" to be an array of objects with process_name, evidence_score, evidence_summary, sources.
-
-                            Got this instead:
-                            {json.dumps(result, indent=2)}
-
-                            Fix the format and return the corrected JSON with the same schema structure."""
-
+        with llm.call(model="high", temp="mid"):
             result = llm.invoke_structured(
-                fix_prompt,
+                user_context,
                 schema=BIOLOGICAL_PROCESS_SCHEMA,
-                system_prompt="You are a JSON format fixer. Return only corrected JSON.",
+                system_prompt=system_prompt,
             )
+
+            # Validate result follows schema (not returning schema itself)
             processes = result.get("processes")
-
-            # If still broken after retry, fail
             if not isinstance(processes, list) or (processes and "type" in processes):
-                raise ValueError("Schema mismatch persists after retry")
+                print("Schema mismatch detected, retrying with fix prompt...")
+                fix_prompt = f"""The following JSON has a schema mismatch. Expected "processes" to be an array of objects with process_name, evidence_score, evidence_summary, sources.
 
-        processes = result["processes"]  # Extract array from wrapper object
+                                Got this instead:
+                                {json.dumps(result, indent=2)}
+
+                                Fix the format and return the corrected JSON with the same schema structure."""
+
+                result = llm.invoke_structured(
+                    fix_prompt,
+                    schema=BIOLOGICAL_PROCESS_SCHEMA,
+                    system_prompt="You are a JSON format fixer. Return only corrected JSON.",
+                )
+                processes = result.get("processes")
+
+                if not isinstance(processes, list) or (processes and "type" in processes):
+                    raise ValueError("Schema mismatch persists after retry")
+
+        processes = result["processes"]
     except Exception as e:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(user_context, system_prompt=system_prompt)
+        with llm.call(model="high", temp="mid"):
+            response = llm.invoke(user_context, system_prompt=system_prompt)
         processes = _extract_json_from_response(response)
-    llm.set_tier("low")
-    print(f"Switching back to low tier model...")
     
     # Validate and deduplicate
     if not processes:
@@ -645,7 +641,8 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
         min_processes=min_processes,
         max_processes=max_processes,
     )
-    critique_text = llm.invoke(unstructured_prompt, system_prompt=critic_system_prompt)
+    with llm.call(model="low", temp="mid"):
+        critique_text = llm.invoke(unstructured_prompt, system_prompt=critic_system_prompt)
 
     # Step 2: Structured recommendations
     structured_prompt = PHASE1_CRITIC_STRUCTURED_PROMPT.format(
@@ -654,12 +651,14 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
     )
 
     try:
-        recommendations = llm.invoke_structured(
-            structured_prompt, schema=CRITIC_STRUCTURED_SCHEMA, system_prompt=critic_system_prompt
-        )
+        with llm.call(model="low", temp="low"):
+            recommendations = llm.invoke_structured(
+                structured_prompt, schema=CRITIC_STRUCTURED_SCHEMA, system_prompt=critic_system_prompt
+            )
     except Exception as e:
         print(f"Structured output failed ({e}), falling back to JSON parsing")
-        response = llm.invoke(structured_prompt, system_prompt=critic_system_prompt)
+        with llm.call(model="low", temp="low"):
+            response = llm.invoke(structured_prompt, system_prompt=critic_system_prompt)
         recommendations = _extract_json_from_response(response)
 
     # Log critic results

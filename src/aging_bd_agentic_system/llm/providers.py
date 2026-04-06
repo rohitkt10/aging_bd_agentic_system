@@ -78,7 +78,7 @@ class VertexGeminiProvider(LLMProvider):
         )
 
     def invoke(
-        self, prompt: str, *, system_prompt: str | None = None, **kwargs: Any
+        self, prompt: str, *, system_prompt: str | None = None, temperature: float | None = None, **kwargs: Any
     ) -> str:
         """
         Invoke LLM with text prompt, return response text.
@@ -86,6 +86,7 @@ class VertexGeminiProvider(LLMProvider):
         Args:
             prompt: The user prompt/task
             system_prompt: Optional system prompt with instructions
+            temperature: Override temperature for this call
             **kwargs: Additional provider-specific parameters
         """
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -98,7 +99,8 @@ class VertexGeminiProvider(LLMProvider):
         else:
             messages = [HumanMessage(content=prompt)]
 
-        response = self.llm.invoke(messages, **kwargs)
+        llm = self.llm.bind(temperature=temperature) if temperature is not None else self.llm
+        response = llm.invoke(messages, **kwargs)
         return response.content
 
     def invoke_structured(
@@ -107,6 +109,7 @@ class VertexGeminiProvider(LLMProvider):
         schema: dict[str, Any],
         *,
         system_prompt: str | None = None,
+        temperature: float | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
@@ -116,6 +119,7 @@ class VertexGeminiProvider(LLMProvider):
             prompt: The user prompt/task
             schema: Expected output schema
             system_prompt: Optional system prompt with instructions
+            temperature: Override temperature for this call
             **kwargs: Additional provider-specific parameters
 
         Note: Uses LangChain's with_structured_output() which works with
@@ -123,8 +127,8 @@ class VertexGeminiProvider(LLMProvider):
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        # Wrap the LLM with structured output
-        llm_structured = self.llm.with_structured_output(schema)
+        llm = self.llm.bind(temperature=temperature) if temperature is not None else self.llm
+        llm_structured = llm.with_structured_output(schema)
 
         if system_prompt:
             messages = [
@@ -170,7 +174,7 @@ class OpenAIProvider(LLMProvider):
         )
 
     def invoke(
-        self, prompt: str, *, system_prompt: str | None = None, **kwargs: Any
+        self, prompt: str, *, system_prompt: str | None = None, temperature: float | None = None, **kwargs: Any
     ) -> str:
         """
         Invoke LLM with text prompt, return response text.
@@ -178,6 +182,7 @@ class OpenAIProvider(LLMProvider):
         Args:
             prompt: The user prompt/task
             system_prompt: Optional system prompt with instructions
+            temperature: Override temperature for this call
             **kwargs: Additional provider-specific parameters
         """
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -190,7 +195,8 @@ class OpenAIProvider(LLMProvider):
         else:
             messages = [HumanMessage(content=prompt)]
 
-        response = self.llm.invoke(messages, **kwargs)
+        llm = self.llm.bind(temperature=temperature) if temperature is not None else self.llm
+        response = llm.invoke(messages, **kwargs)
         return response.content
 
     def invoke_structured(
@@ -199,6 +205,7 @@ class OpenAIProvider(LLMProvider):
         schema: dict[str, Any],
         *,
         system_prompt: str | None = None,
+        temperature: float | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
@@ -208,6 +215,7 @@ class OpenAIProvider(LLMProvider):
             prompt: The user prompt/task
             schema: Expected output schema
             system_prompt: Optional system prompt with instructions
+            temperature: Override temperature for this call
             **kwargs: Additional provider-specific parameters
 
         Note: Uses LangChain's with_structured_output() which works with
@@ -215,8 +223,8 @@ class OpenAIProvider(LLMProvider):
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        # Wrap the LLM with structured output
-        llm_structured = self.llm.with_structured_output(schema)
+        llm = self.llm.bind(temperature=temperature) if temperature is not None else self.llm
+        llm_structured = llm.with_structured_output(schema)
 
         if system_prompt:
             messages = [

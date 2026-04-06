@@ -125,9 +125,10 @@ def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
     llm = get_llm()
     print("Generating review of current draft...")
     try:
-        critic_review = llm.invoke_structured(
-            user_prompt, schema=critic_schema, system_prompt=CRITIC_SYSTEM_PROMPT
-        )
+        with llm.call(model="low", temp="mid"):
+            critic_review = llm.invoke_structured(
+                user_prompt, schema=critic_schema, system_prompt=CRITIC_SYSTEM_PROMPT
+            )
 
         # Post-process: Fix common LLM schema violations
         # Issue 1: recommendations nested inside review instead of top-level

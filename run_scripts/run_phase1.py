@@ -41,8 +41,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Phase 1: Generate biological processes")
     parser.add_argument(
         "--config",
-        default=Path(__file__).parent / "test_config.yaml",
-        help="Path to config YAML file (default: test_expt/test_config.yaml)",
+        required=True,
+        help="Path to config YAML file",
     )
     return parser.parse_args()
 

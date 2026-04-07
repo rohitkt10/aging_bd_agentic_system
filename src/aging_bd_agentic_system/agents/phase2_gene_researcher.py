@@ -272,6 +272,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     vector_db_top_k = p2.get("phase2_vector_db_top_k", 10)
     pubmed_retmax = p2.get("phase2_pubmed_retmax", 10)
     summarize_max_tokens = p2.get("phase2_summarize_max_tokens", 100000)
+    min_genes = p2.get("min_genes", 30)
+    max_genes = p2.get("max_genes", 50)
     min_actions_per_iteration = p2.get("min_actions_per_iteration", 2)
     max_actions_per_iteration = p2.get("max_actions_per_iteration", 4)
     all_biological_processes = get_all_biological_processes(cfg.get("output_dir"), hallmark)
@@ -719,6 +721,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             all_biological_processes=all_biological_processes,
             research_summary=state_of_knowledge.get("summary", "No summary available."),
             gene_evidence=json.dumps(gene_evidence, indent=2),
+            min_genes=min_genes,
+            max_genes=max_genes,
         )
         scored_genes_schema = {
             "title": "scored_genes_response",

@@ -574,16 +574,16 @@ You are the final gene scorer for Phase 2. Your job is to review the synthesized
 
 ## Scoring Guidelines
 
-**Target output: 30-50 genes per biological process. Maximum 50 genes.**
+**Target output: {min_genes}-{max_genes} genes per biological process. Maximum {max_genes} genes.**
 
 Use the full 5-10 scoring range to discriminate between genes:
 - **9-10**: Exceptional evidence from 3+ sources with direct mechanistic links
 - **7-8**: Strong evidence from 2+ sources (database + literature)
 - **5-6**: Found in at least one source with evidence connecting it to the process
 
-**If you have 50+ candidate genes:** Be selective. Prioritize genes with stronger evidence and direct mechanistic relevance. Score marginal cases below 5 to exclude them.
+**If you have {max_genes}+ candidate genes:** Be selective. Prioritize genes with stronger evidence and direct mechanistic relevance. Score marginal cases below 5 to exclude them.
 
-**If you have fewer than 30 candidate genes:** Be inclusive. Include any gene with at least one source and plausible relevance.
+**If you have fewer than {min_genes} candidate genes:** Be inclusive. Include any gene with at least one source and plausible relevance.
 
 **Exclude only:**
 - Genes with NO sources or citations

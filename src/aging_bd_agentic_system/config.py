@@ -59,6 +59,10 @@ class Phase2Config:
     # Context management
     phase2_summarize_max_tokens: int = 100000
 
+    # Gene count targets
+    min_genes: int = 30
+    max_genes: int = 50
+
     # Critic-refine loop settings
     max_critic_iterations: int = 2
     refine_opengenes_max_results: int = 15
@@ -275,5 +279,9 @@ class RunConfig:
             self.phase2.refine_pubmed_max_results = kwargs["refine_pubmed_max_results"]
         if kwargs.get("refine_vector_db_top_k") is not None:
             self.phase2.refine_vector_db_top_k = kwargs["refine_vector_db_top_k"]
+        if kwargs.get("min_genes") is not None:
+            self.phase2.min_genes = kwargs["min_genes"]
+        if kwargs.get("max_genes") is not None:
+            self.phase2.max_genes = kwargs["max_genes"]
 
         return self

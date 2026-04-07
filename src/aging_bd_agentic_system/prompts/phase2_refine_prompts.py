@@ -64,7 +64,7 @@ Return a JSON object with this exact structure:
 
 ## Important Reminders
 
-- Target gene count: 30-50 genes per biological process
+- Target gene count: {min_genes}-{max_genes} genes per biological process
 - If trimming is needed, keep the highest-scored genes
 - Preserve all citations from research summaries
 - Exercise scientific judgment

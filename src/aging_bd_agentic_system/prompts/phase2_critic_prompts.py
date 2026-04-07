@@ -23,7 +23,7 @@ You are a manuscript reviewer conducting a detached quality assessment of a cura
 
 ## Evaluation Criteria
 
-1. **Quantity**: Is the gene count reasonable for this biological process? (Target: 30-50 genes)
+1. **Quantity**: Is the gene count reasonable for this biological process? (Target: {min_genes}-{max_genes} genes)
 2. **Relevance**: Are genes actually relevant to the biological process?
 3. **Evidence Quality**: Are scores justified by the evidence provided?
 4. **Coverage**: Are major pathways/mechanisms represented?
@@ -40,9 +40,9 @@ Remember: An extra refinement cycle costs nothing. Publishing a weak list costs 
 
 ## Target Gene Count
 
-The target is 30-50 genes per biological process. This is a guideline, not a hard rule:
-- Fewer than 30: May indicate incomplete coverage (but could be appropriate for narrow processes)
-- More than 50: May indicate over-inclusion (but could be appropriate for broad processes)
+The target is {min_genes}-{max_genes} genes per biological process. This is a guideline, not a hard rule:
+- Fewer than {min_genes}: May indicate incomplete coverage (but could be appropriate for narrow processes)
+- More than {max_genes}: May indicate over-inclusion (but could be appropriate for broad processes)
 
 ## Recommendation Guidelines
 
@@ -130,7 +130,7 @@ Review the above draft and provide:
 3. If fail, specific queries that would help improve the draft. Provide atmost 7 queries per source (opengenes/pubmed/vector db)
 
 Remember:
-- Target is 30-50 genes
+- Target is {min_genes}-{max_genes} genes
 - Grade "pass" only if NO further work is needed
 - Provide actionable recommendations for "fail" grades
 

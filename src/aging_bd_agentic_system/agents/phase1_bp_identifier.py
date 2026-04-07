@@ -190,6 +190,8 @@ def _summarize_goal_results(
     max_words: int = 300,
     min_processes: int = 10,
     max_processes: int = 15,
+    min_genes: int = 30,
+    max_genes: int = 50,
 ) -> dict[str, str]:
     """
     Summarize corpus and PubMed results for a single research goal.
@@ -204,6 +206,8 @@ def _summarize_goal_results(
         max_words: Approximate max words per summary section (default 300)
         min_processes: Minimum number of biological processes to identify
         max_processes: Maximum number of biological processes to identify
+        min_genes: Minimum number of genes to discover per biological process
+        max_genes: Maximum number of genes to discover per biological process
 
     Returns:
         Dict with goal, corpus_summary, and pubmed_summary
@@ -214,6 +218,8 @@ def _summarize_goal_results(
     system_prompt = PHASE1_SUMMARY_SYSTEM_PROMPT.format(
         min_processes=min_processes,
         max_processes=max_processes,
+        min_genes=min_genes,
+        max_genes=max_genes,
     )
 
     # Format raw results
@@ -308,10 +314,13 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
     # Read config from state
     cfg = state.get("config", {})
     p1 = cfg.get("phase1", {})
+    p2 = cfg.get("phase2", {})
     min_research_goals = p1.get("min_research_goals", 4)
     max_research_goals = p1.get("max_research_goals", 6)
     min_processes = p1.get("min_processes", 10)
     max_processes = p1.get("max_processes", 15)
+    min_genes = p2.get("min_genes", 30)
+    max_genes = p2.get("max_genes", 50)
 
     system_prompt = PHASE1_PLAN_SYSTEM_PROMPT.format(
         hallmark_name=hallmark,
@@ -319,6 +328,8 @@ def phase1_plan(state: dict[str, Any]) -> dict[str, Any]:
         max_goals=max_research_goals,
         min_processes=min_processes,
         max_processes=max_processes,
+        min_genes=min_genes,
+        max_genes=max_genes,
     )
 
     user_prompt = f"""## Reference Context
@@ -367,11 +378,14 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
     # Read config from state
     cfg = state.get("config", {})
     p1 = cfg.get("phase1", {})
+    p2 = cfg.get("phase2", {})
     vector_db_top_k = p1.get("phase1_vector_db_top_k", 20)
     pubmed_retmax = p1.get("phase1_pubmed_retmax", 10)
     summary_max_words = p1.get("summary_max_words", 300)
     min_processes = p1.get("min_processes", 10)
     max_processes = p1.get("max_processes", 15)
+    min_genes = p2.get("min_genes", 30)
+    max_genes = p2.get("max_genes", 50)
 
     # Determine current iteration
     current_iteration = state.get("phase1_iteration", 0)
@@ -426,6 +440,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
                     max_words=summary_max_words,
                     min_processes=min_processes,
                     max_processes=max_processes,
+                    min_genes=min_genes,
+                    max_genes=max_genes,
                 )
                 goal_summaries.append(summary)
 
@@ -458,6 +474,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
             hallmark_name=hallmark,
             min_processes=min_processes,
             max_processes=max_processes,
+            min_genes=min_genes,
+            max_genes=max_genes,
         )
 
 
@@ -502,6 +520,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
                 max_words=summary_max_words,
                 min_processes=min_processes,
                 max_processes=max_processes,
+                min_genes=min_genes,
+                max_genes=max_genes,
             )
             corpus_summary = summary.get("corpus_summary", "No results")
             pubmed_summary = summary.get("pubmed_summary", "No results")
@@ -535,6 +555,8 @@ def phase1_research(state: dict[str, Any]) -> dict[str, Any]:
             hallmark_name=hallmark,
             min_processes=min_processes,
             max_processes=max_processes,
+            min_genes=min_genes,
+            max_genes=max_genes,
         )
 
     # === CALL LLM ===
@@ -606,9 +628,12 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
     # Read config from state
     cfg = state.get("config", {})
     p1 = cfg.get("phase1", {})
+    p2 = cfg.get("phase2", {})
     max_iterations = p1.get("max_iterations", 2)
     min_processes = p1.get("min_processes", 10)
     max_processes = p1.get("max_processes", 15)
+    min_genes = p2.get("min_genes", 30)
+    max_genes = p2.get("max_genes", 50)
 
     # Track iteration (do NOT increment here - refine does that)
     current_iteration = state.get("phase1_iteration", 0)
@@ -640,6 +665,8 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
     critic_system_prompt = PHASE1_CRITIC_SYSTEM_PROMPT.format(
         min_processes=min_processes,
         max_processes=max_processes,
+        min_genes=min_genes,
+        max_genes=max_genes,
     )
     with llm.call(model="low", temp="mid"):
         critique_text = llm.invoke(unstructured_prompt, system_prompt=critic_system_prompt)

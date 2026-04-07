@@ -18,7 +18,7 @@ This system automates gene discovery for aging biology. Given a hallmark, it ide
 
 ## Workflow
 - Phase 1 (current): Identify {min_processes}-{max_processes} biological processes for a hallmark
-- Phase 2: For each process, discover 30-50 relevant genes to land at 300-500 genes in total 
+- Phase 2: For each process, discover {min_genes}-{max_genes} relevant genes to land at 300-500 genes in total
 
 ## Your Role
 
@@ -112,7 +112,7 @@ This system automates gene discovery for aging biology. Given a hallmark, it ide
 
 ## Workflow
 - Phase 1 (current): Identify {min_processes}-{max_processes} biological processes for a hallmark
-- Phase 2: For each process, discover 30-50 relevant genes to land at 300-500 genes in total
+- Phase 2: For each process, discover {min_genes}-{max_genes} relevant genes to land at 300-500 genes in total
 
 ## Your Role
 
@@ -184,7 +184,7 @@ This system automates gene discovery for aging biology. Given a hallmark, it ide
 
 ## Workflow
 - Phase 1 (current): Identify {min_processes}-{max_processes} biological processes for a hallmark
-- Phase 2: For each process, discover 30-50 relevant genes to land at 300-500 genes in total
+- Phase 2: For each process, discover {min_genes}-{max_genes} relevant genes to land at 300-500 genes in total
 
 ## Your Role
 
@@ -287,7 +287,7 @@ This system automates gene discovery for aging biology. Given a hallmark, it ide
 
 ## Workflow
 - Phase 1 (current): Identify {min_processes}-{max_processes} biological processes for a hallmark
-- Phase 2: For each process, discover 30-50 relevant genes to land at 300-500 genes in total
+- Phase 2: For each process, discover {min_genes}-{max_genes} relevant genes to land at 300-500 genes in total
 
 ## What Counts as a Valid Biological Process
 

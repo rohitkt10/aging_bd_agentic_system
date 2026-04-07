@@ -54,8 +54,8 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
     refine_opengenes_max_results = p2.get("refine_opengenes_max_results", 15)
     refine_pubmed_max_results = p2.get("refine_pubmed_max_results", 10)
     refine_vector_db_top_k = p2.get("refine_vector_db_top_k", 10)
-    min_genes_target = 30
-    max_genes_target = 50
+    min_genes_target = p2.get("min_genes", 30)
+    max_genes_target = p2.get("max_genes", 50)
 
     # Get critic review
     critic_review = state.get("critic_review", {})
@@ -417,6 +417,8 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
         all_biological_processes=all_biological_processes,
         research_summary=state_of_knowledge.get("summary", "No summary available."),
         gene_evidence=json.dumps(gene_evidence, indent=2),
+        min_genes=min_genes_target,
+        max_genes=max_genes_target,
     )
 
     try:

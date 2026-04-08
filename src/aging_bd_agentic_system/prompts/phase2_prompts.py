@@ -69,6 +69,7 @@ Select genes from the GenAge database that are relevant to the biological proces
 2. **Be generous**: If there's any plausible connection to the process or hallmark, include it
 3. **Return symbols only**: Output the gene symbols, not the full records
 4. **No minimum/maximum**: Return all relevant genes you find, even if none or many
+5. **Human evidence only**: Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association.
 
 ## Output Format
 
@@ -459,7 +460,7 @@ which we will essentially label as "core" genes for the hallmark.
 
 ## Your Role
 
-You are the research scientist for Phase 2 gene discovery. You are curating a gene list for a biological process in the context of an aging hallmark.
+You are the research scientist for Phase 2 gene discovery. You are curating a gene list for a biological process in the context of an aging hallmark. Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association.
 
 ## Current Research Task
 
@@ -574,6 +575,8 @@ You are the final gene scorer for Phase 2. Your job is to review the synthesized
 
 ## Scoring Guidelines
 
+**Human evidence only**: Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association.
+
 **Target output: {min_genes}-{max_genes} genes per biological process. Maximum {max_genes} genes.**
 
 Use the full 5-10 scoring range to discriminate between genes:
@@ -588,6 +591,7 @@ Use the full 5-10 scoring range to discriminate between genes:
 **Exclude only:**
 - Genes with NO sources or citations
 - Genes clearly unrelated to the biological process
+- Genes supported only by model organism evidence (mouse, C. elegans, yeast, etc.) with no direct human evidence
 
 ## Output Schema
 
@@ -635,6 +639,7 @@ Evaluate gene evidence for biological process: {biological_process}
 1. Count: Should have 20+ genes (for this single process)
 2. Evidence: Each gene must have sources and evidence summary
 3. Relevance: Genes must be directly relevant to the biological process
+4. Human evidence: Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 ## Output Format
 Return ONLY JSON:
@@ -732,6 +737,7 @@ Create an actionability-focused summary that identifies:
 - **Confidence 7-8**: Genes from seeds OR multiple mentions in findings
 - **Confidence 5-6**: Genes with 2-3 supporting findings
 - **Confidence 1-4**: Genes with single/weak findings
+- Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 - **Value Score 9-10**: Critical mechanistic insights, direct links to aging
 - **Value Score 7-8**: Strong supporting evidence, clear relevance
@@ -941,6 +947,8 @@ Return ONLY JSON:
 ```
 
 IMPORTANT: Process ALL findings. Do not truncate or limit.
+
+Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association.
 
 Return JSON only, no additional text.
 """
@@ -1169,6 +1177,7 @@ Return ONLY JSON:
 - The summary should be a cohesive narrative, not bullet points
 - ⚠️ `gene_evidence_updates` MUST contain an entry for EVERY gene shown in `gene_evidence_subset`
 - ⚠️ Each gene's `new_citations` must include citations from ALL sources that mentioned it
+- Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 Return JSON only, no additional text.
 """

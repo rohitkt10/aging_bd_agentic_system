@@ -144,7 +144,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
         review_recommendations=json.dumps(critic_review.get("recommendations", {}), indent=2),
     )
     try:
-        with llm.call(model="low", temp="mid"):
+        with llm.call(model="high", temp="mid"):
             assessment = llm.invoke_structured(
                 assessment_user_prompt,
                 schema=assessment_schema,

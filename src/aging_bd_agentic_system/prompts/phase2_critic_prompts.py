@@ -79,6 +79,7 @@ If you find yourself wanting to suggest additional research (e.g., "consider add
 - Focus on actionable feedback
 - Do NOT concern yourself with how many review cycles remain
 - Grade "pass" only if you believe the draft needs NO further work
+- Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 Return JSON only, no additional text.
 """

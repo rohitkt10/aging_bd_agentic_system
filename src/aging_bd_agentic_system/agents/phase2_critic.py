@@ -134,7 +134,7 @@ def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
             min_genes=min_genes,
             max_genes=max_genes,
         )
-        with llm.call(model="low", temp="mid"):
+        with llm.call(model="high", temp="mid"):
             critic_review = llm.invoke_structured(
                 user_prompt, schema=critic_schema, system_prompt=critic_system_prompt
             )

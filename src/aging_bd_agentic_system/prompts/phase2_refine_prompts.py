@@ -68,6 +68,7 @@ Return a JSON object with this exact structure:
 - If trimming is needed, keep the highest-scored genes
 - Preserve all citations from research summaries
 - Exercise scientific judgment
+- Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 Return JSON only, no additional text.
 """
@@ -111,7 +112,7 @@ REFINEMENT_USER_PROMPT_TEMPLATE = """## Context
 
 ## Your Task
 
-Synthesize the research results above with the current draft. Update the gene list, evidence, and state of knowledge based on new findings.
+Synthesize the research results above with the current draft. Update the gene list, evidence, and state of knowledge based on new findings. Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association.
 
 Return JSON only, no additional text.
 """
@@ -471,6 +472,7 @@ Return ONLY JSON:
 - The summary should address reviewer concerns where possible
 - `gene_evidence_updates` MUST contain an entry for EVERY gene shown in `gene_evidence_subset`
 - Each gene's `new_citations` must include citations from ALL sources that mentioned it
+- Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 Return JSON only, no additional text.
 """

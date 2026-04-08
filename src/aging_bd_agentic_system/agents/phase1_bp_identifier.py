@@ -668,7 +668,7 @@ def phase1_critic(state: dict[str, Any]) -> dict[str, Any]:
         min_genes=min_genes,
         max_genes=max_genes,
     )
-    with llm.call(model="low", temp="mid"):
+    with llm.call(model="high", temp="mid"):
         critique_text = llm.invoke(unstructured_prompt, system_prompt=critic_system_prompt)
 
     # Step 2: Structured recommendations

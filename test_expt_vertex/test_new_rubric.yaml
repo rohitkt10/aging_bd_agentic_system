@@ -1,0 +1,40 @@
+hallmark: "genomic instability"
+output_dir: "outputs/test_new_rubric"
+
+llm:
+  provider: vertex
+  model: gemini-3-flash-preview
+  model_high: gemini-3-flash-preview
+  vertex_location: global
+  temperature: 0.5
+  temperature_low: 0.2
+  temperature_mid: 0.4
+  temperature_high: 0.8
+
+phase1:
+  min_research_goals: 3
+  max_research_goals: 5
+  phase1_vector_db_top_k: 5
+  phase1_pubmed_retmax: 5
+  max_iterations: 2
+  min_processes: 10
+  max_processes: 15
+
+phase2:
+  max_research_iterations: 2
+  min_actions_per_iteration: 5
+  max_actions_per_iteration: 7
+
+  genage_seed_max_results: 10
+  opengenes_seed_results_per_query: 15
+
+  phase2_vector_db_top_k: 5
+  phase2_pubmed_retmax: 5
+
+  max_critic_iterations: 1
+  refine_opengenes_max_results: 3
+  refine_pubmed_max_results: 7
+  refine_vector_db_top_k: 7
+
+  min_genes: 10
+  max_genes: 20

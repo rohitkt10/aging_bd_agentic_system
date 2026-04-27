@@ -27,7 +27,7 @@ You are a researcher synthesizing new evidence to update a gene list. Research q
 Adjust scores incrementally based on new evidence:
 - **Strengthen** scores for genes with new corroborating evidence
 - **Lower** scores for genes where evidence was found lacking
-- **Add** new genes discovered with appropriate initial scores (5-7)
+- **Add** new genes discovered with appropriate initial scores (5–6, Supporting Role)
 - **Remove** genes that are clearly irrelevant to the biological process
 
 ## Output Schema
@@ -297,7 +297,13 @@ You are the research summarizer for Phase 2 refinement. Your job is to compress 
 
 Extract from the results:
 1. **Genes mentioned** - Any gene symbols found (highlight NEW genes not in candidate list)
-2. **Key findings** - 2-4 bullet points, ~50 words each, focused on evidence relevant to the biological process
+2. **Key findings** - 2-4 bullet points, ~50 words each. For each finding, prefix with
+   the evidence type in brackets:
+   - [CAUSAL]: Direct LOF/GOF studies, disease mutations, lifespan intervention
+   - [FUNCTIONAL]: Essential pathway role, complex membership, enzymatic function
+   - [ASSOCIATIVE]: Expression changes, GWAS hits, correlational studies
+   Example: "[CAUSAL] TP53 germline mutations accelerate aging phenotypes in Li-Fraumeni
+   syndrome patients (pmid:12345)."
 3. **Citations** - CRITICAL: Preserve all source references in proper format
 4. **Relevance** - 1-2 sentences on how this relates to the biological process
 
@@ -439,7 +445,12 @@ Synthesize the above and output updates to the state of knowledge. Address revie
    - How findings address reviewer concerns (or why they couldn't be addressed)
    - What still needs investigation
 4. **gene_evidence_updates**: You MUST provide an entry for EVERY gene in `gene_evidence_subset` above. For each gene:
-   - `evidence_notes`: Compressed summary (~50 words) of evidence (replace existing)
+   - `evidence_notes`: Compressed ~50 word summary. Begin with the strongest evidence type
+     for this gene in brackets: [CAUSAL], [FUNCTIONAL], or [ASSOCIATIVE]. This classification
+     is used by the downstream scorer.
+     Example: "[FUNCTIONAL] BRCA1 is essential for homologous recombination DSB repair,
+     forming a core complex with BARD1. Strong human functional evidence from cell lines
+     and BRCA1-mutant patient studies."
    - `new_citations`: ALL citations for this gene from ALL source summaries
    - `sources_found`: Which sources mentioned this gene (for flag updates)
 

@@ -25,7 +25,11 @@ You are a manuscript reviewer conducting a detached quality assessment of a cura
 
 1. **Quantity**: Is the gene count reasonable for this biological process? (Target: {min_genes}-{max_genes} genes)
 2. **Relevance**: Are genes actually relevant to the biological process?
-3. **Evidence Quality**: Are scores justified by the evidence provided?
+3. **Evidence Quality**: Are scores justified by the rubric?
+   - 9–10 (Essential Driver): Must have direct causal human evidence (LOF/GOF → aging phenotype)
+   - 7–8 (Core Mediator): Must have functional human evidence (central pathway/complex role)
+   - 5–6 (Supporting Role): Associative evidence acceptable (expression, GWAS, indirect)
+   Flag any gene scored 9–10 without causal evidence, or 7–8 without functional evidence.
 4. **Coverage**: Are major pathways/mechanisms represented?
 5. **Red Flags**: Any suspicious high scores? Genes that clearly don't belong?
 

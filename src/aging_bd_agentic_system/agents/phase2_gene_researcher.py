@@ -491,19 +491,20 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             new_findings.append(finding)
             opengenes_findings.append(finding)
 
+    summarizer_schema = {
+        "title": "tool_summary",
+        "type": "object",
+        "properties": {
+            "genes_mentioned": {"type": "array", "items": {"type": "string"}},
+            "key_findings": {"type": "array", "items": {"type": "string"}},
+            "citations": {"type": "array", "items": {"type": "string"}},
+            "relevance_to_process": {"type": "string"},
+        },
+        "required": ["genes_mentioned", "key_findings", "citations", "relevance_to_process"],
+    }
+
     # Summarize OpenGenes results
     if opengenes_findings:
-        summarizer_schema = {
-            "title": "tool_summary",
-            "type": "object",
-            "properties": {
-                "genes_mentioned": {"type": "array", "items": {"type": "string"}},
-                "key_findings": {"type": "array", "items": {"type": "string"}},
-                "citations": {"type": "array", "items": {"type": "string"}},
-                "relevance_to_process": {"type": "string"},
-            },
-            "required": ["genes_mentioned", "key_findings", "citations", "relevance_to_process"],
-        }
         summarizer_system = PHASE2_TOOL_SUMMARIZER_PROMPT.format(
             biological_process=bp_name,
             hallmark_name=hallmark,

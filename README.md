@@ -1,385 +1,281 @@
 # Aging BD Agentic System
 
-An LLM-powered deep research system for aging biological discovery gene list curation. This system replaces manual Gemini Deep Research workflows with a controllable, local, and fully auditable alternative.
+An LLM-driven deep-research pipeline for curating aging-related gene lists. Given one of
+the hallmarks of aging, the system autonomously identifies the relevant biological
+processes, researches the genes implicated in each process across multiple evidence
+sources, scores those genes against a causal-evidence rubric, and produces a ranked,
+fully auditable gene table. It is a controllable, local, reproducible alternative to
+manual Deep Research workflows.
 
 ## Overview
 
-This system automates the curation of aging-related gene lists by:
+The pipeline runs in two phases, orchestrated as a LangGraph state machine.
 
-1. **Phase 1:** Identifying 10-15 biological processes relevant to an aging hallmark
-2. **Phase 2:** For each biological process, conducting autonomous research to discover 300-500 relevant genes with evidence
+**Phase 1 — Biological process identification.** Starting from a single aging hallmark,
+an LLM research agent plans a set of research goals, queries the literature corpus and
+PubMed, and synthesizes a ranked list of 10–15 biological processes relevant to that
+hallmark. A critic/refine loop iterates until the list meets a quality bar.
 
-The system uses a LangGraph-based workflow with an autonomous ReAct research loop, querying multiple evidence sources (GenAge, OpenGenes, PubMed, literature corpus, Gene Ontology) and leveraging LLM-powered critique and refinement.
+**Phase 2 — Gene research per process.** For each biological process, an autonomous
+ReAct research loop seeds candidate genes from curated aging databases and then
+iteratively queries OpenGenes, PubMed, and the literature corpus to accumulate evidence.
+A manuscript-review-style critic grades the result and triggers a refinement loop when
+needed. Each gene is scored on a causal-evidence rubric, and the relevant Gene Ontology
+terms are mapped to the process.
 
-## Status
+The per-process results are aggregated into a single hallmark-level gene table, ranked by
+evidence score and annotated with how broadly each gene recurs across the hallmark's
+processes.
 
-- ✅ **Phase 1 (BP Discovery):** Implemented and tested
-- 🔄 **Phase 2 (Gene Research):** Implemented, smoke testing in progress
-- ✅ **Multi-provider LLM:** OpenAI and Vertex AI supported
-- ✅ **Observability:** Tracing and audit logging
+## Method
 
-## Features
+### Evidence sources
 
-- **Autonomous Research Loop:** ReAct-style iterative research with configurable iteration limits
-- **Multi-Source Evidence:** Queries GenAge, OpenGenes, PubMed, FAISS-indexed literature corpus, and Gene Ontology
-- **Multi-Provider LLM Support:** OpenAI GPT-4o/GPT-4o-mini and Vertex AI Gemini models
-- **Structured Outputs:** Produces validated TSV files for biological processes, genes, and GO terms
-- **Full Observability:** Two-tier logging with per-call traces and audit events
-- **Configurable:** YAML config files with CLI overrides; config hierarchy: defaults → YAML → CLI
-- **Auditable:** Complete state export and trace files for every run
-- **Independent Smoke Tests:** Phase 1 and Phase 2 can be tested independently
+| Source | Access | Role |
+|--------|--------|------|
+| GenAge | Local curated CSV | Phase 2 seeding |
+| OpenGenes | REST API | Seeding and iterative research |
+| PubMed | NCBI Entrez (Biopython) | Phase 1 and Phase 2 literature search |
+| Literature corpus | FAISS index over PMC full text, `BAAI/bge-base-en-v1.5` embeddings | Semantic retrieval in both phases |
+| Gene Ontology | Local `go-basic.json` | GO term mapping per process |
 
-## Architecture
+### Scoring rubric
+
+Genes are scored on the strength and nature of **human** evidence, not source count.
+Model-organism findings do not drive inclusion without corroborating human evidence.
+
+| Score | Label | Criterion |
+|-------|-------|-----------|
+| 9–10 | Essential Driver | Direct causal human evidence: loss- or gain-of-function produces aging phenotypes, accelerated age-related disease, or altered lifespan. Mechanism well characterized. |
+| 7–8 | Core Mediator | Essential functional role — central to a key complex, pathway, or regulatory mechanism — supported by human functional studies. |
+| 5–6 | Supporting Role | Validated but indirect, tissue-specific, or primarily associative involvement (expression changes, GWAS without functional follow-up). |
+
+Evidence is tagged `[CAUSAL]`, `[FUNCTIONAL]`, or `[ASSOCIATIVE]` as it is collected, so
+the scorer has a basis for the rubric rather than counting citations.
+
+### Language models
+
+A single client exposes two independent axes:
+
+- **Model tier** — `low` (fast) and `high` (capable), selected per call site.
+- **Temperature tier** — `low`, `mid`, `high`, selected independently of the model tier.
+
+Decoupling the axes lets, for example, gene scoring run on the capable model at low
+temperature (judgment quality with reproducible output), while strategic synthesis runs
+on the capable model at high temperature (exploratory). The default provider is Vertex AI
+(`gemini-2.5-pro`); OpenAI is also supported.
+
+## Repository layout
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         LANGGRAPH WORKFLOW                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│  PHASE 1: Biological Process Identification                              │
-│  ┌──────────┐   ┌───────────┐   ┌──────────┐   ┌─────────┐   ┌────────┐ │
-│  │load_ctx  │ → │ plan/     │ → │ research │ → │ critic  │ → │finalize│ │
-│  │          │   │ research  │   │  (LLM)   │   │  (LLM)  │   │        │ │
-│  └──────────┘   └───────────┘   └──────────┘   └────┬────┘   └────────┘ │
-│                                                   ↓ refine (if fail)    │
-├─────────────────────────────────────────────────────────────────────────┤
-│  PHASE 2: Gene Research (per Biological Process)                        │
-│  ┌──────────┐   ┌───────────────────────────────────────────────┐      │
-│  │select_bp │ → │ ReAct Research Loop (7 iterations default)    │      │
-│  └──────────┘   │  • GenAge  • OpenGenes  • PubMed  • Vector DB │      │
-│                 └───────────────┬───────────────────────────────┘      │
-│                                 ↓                                        │
-│                 ┌──────────────┐   ┌──────────────┐   ┌──────────┐     │
-│                 │ critic (LLM) │ → │ refine/map_go│ → │advance_bp│     │
-│                 └──────────────┘   └──────────────┘   └──────────┘     │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-## Quick Start
-
-```bash
-# 1. Clone and install
-git clone <repo-url>
-cd aging_bd_agentic_system
-uv sync
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your OPENAI_API_KEY (for OpenAI) or VERTEX_PROJECT_ID (for Vertex AI)
-
-# 3. (Optional) Set up Google Cloud credentials if using Vertex AI
-gcloud auth application-default login
-
-# 4. Run for a hallmark
-python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
-
-# 5. Check outputs
-ls outputs/epigenetic_alterations/
-```
-
-### Using Config Files
-
-```bash
-# Run with a config file (recommended for reproducibility)
-python -m aging_bd_agentic_system.main --config config/test_config.yaml
-
-# Run Phase 1 only (skip gene research)
-python -m aging_bd_agentic_system.main --hallmark "genomic instability" --phase1-only true
-```
-
-### Smoke Tests
-
-Test each phase independently:
-
-```bash
-# Phase 1 smoke test (BP discovery)
-python scripts/phase1_research_smoketest.py
-
-# Phase 2 smoke test (uses saved Phase 1 data)
-python scripts/phase2_research_smoketest.py --hallmark "genomic instability" --bp-index 0
+src/aging_bd_agentic_system/
+  agents/              Phase 1 and Phase 2 node implementations
+  graph/               LangGraph state schema and workflow builders
+  prompts/             Phase 1, Phase 2, critic, and refine prompt templates
+  tools/               The five evidence-source tools
+  llm/                 Provider abstraction and the two-axis client
+  literature_pipeline/ Corpus ingestion, chunking, embedding, indexing
+  utils/               Aggregation, validation, output writing, audit logging
+  observability/       Tracing and audit instrumentation
+  config.py            RunConfig / LLMConfig / Phase1Config / Phase2Config
+  main.py              Unified CLI entry point
+config/
+  default.yaml         Production defaults
+run_scripts/
+  run_phase1.py        Phase 1 runner
+  run_phase2_bp.py     Phase 2 runner for one biological process
+  run_aggregation.py   Hallmark-level aggregation
+jobs/                  SLURM submission scripts
+scripts/               Corpus-building and integration-check scripts
+data/                  Databases, GO ontology, FAISS corpus, reference paper
+tests/                 Unit and integration tests
+outputs/               Generated results per hallmark
 ```
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Google Cloud account with Vertex AI enabled
-- Google Cloud Application Default Credentials
-
-### Setup
+Requires Python 3.12+ and the [uv](https://docs.astral.sh/uv/) package manager.
 
 ```bash
-# Install dependencies
+uv venv
 uv sync
-
-# Activate virtual environment
-source .venv/bin/activate
-
-# Authenticate with Google Cloud
-gcloud auth application-default login
-gcloud config set project YOUR_PROJECT_ID
 ```
 
-### Build Literature Corpus (One-time)
+Common development tasks are exposed through the Makefile:
 
 ```bash
-python scripts/fetch_pmc.py --n 500
+make sync   # uv sync
+make test   # uv run pytest
+make lint   # uv run ruff check .
+make fmt    # uv run ruff format .
+```
+
+### Credentials
+
+Secrets are read from a `.env` file at the repository root; the run scripts load it
+automatically.
+
+```bash
+VERTEX_PROJECT_ID=your-gcp-project-id   # for the Vertex AI provider
+NCBI_EMAIL=your-email@example.org        # required for PubMed access
+NCBI_API_KEY=your-ncbi-api-key           # optional; raises the PubMed rate limit
+OPENAI_API_KEY=sk-...                    # only if using the OpenAI provider
+```
+
+For the Vertex AI provider, authenticate once per machine:
+
+```bash
+gcloud auth application-default login
+gcloud config set project your-gcp-project-id
+```
+
+### Literature corpus
+
+The FAISS index is built once. If `data/corpus/` does not contain an index:
+
+```bash
+python scripts/fetch_pmc.py
 python scripts/build_chunks.py
 python scripts/build_index.py
 ```
 
 ## Configuration
 
-Configuration follows a priority hierarchy: **defaults → YAML file → CLI arguments**
+Configuration resolves in three layers, lowest to highest priority:
 
-### Environment Variables (.env)
+1. Dataclass defaults in `config.py`.
+2. A YAML config file (`RunConfig.from_yaml`), merged field-by-field over the defaults.
+3. CLI flags, applied only where a value is provided.
 
-Secrets only (API keys, project IDs):
-
-```bash
-# OpenAI (default provider)
-OPENAI_API_KEY=your-openai-api-key
-
-# Vertex AI (alternative provider)
-VERTEX_PROJECT_ID=your-google-cloud-project-id
-VERTEX_LOCATION=us-central1
-
-# Required for both providers
-NCBI_EMAIL=your-email@example.com
-NCBI_API_KEY=optional-ncbi-api-key  # Faster PubMed queries
-```
-
-### YAML Config File
-
-Create a config file for reproducible runs:
+`config/default.yaml` holds the production defaults. Experiment configs typically live
+alongside the run and override the parameters of interest. A representative config:
 
 ```yaml
-# config/test_config.yaml
 hallmark: "genomic instability"
-output_dir: "outputs"
-phase1_only: true  # Set to false to run Phase 2
+output_dir: "outputs/my_experiment"
 
 llm:
-  provider: openai  # or "vertex"
-  model: gpt-4o     # or "gemini-2.0-flash-exp-01-21"
-  temperature: 0.7
+  provider: vertex
+  model: gemini-2.5-pro
+  vertex_location: us-central1
+  temperature: 0.3        # global fallback
+  temperature_low: 0.2
+  temperature_mid: 0.4
+  temperature_high: 0.8
 
 phase1:
-  max_iterations: 2
+  min_processes: 10
   max_processes: 15
+  max_iterations: 2
 
 phase2:
   max_research_iterations: 7
-  max_refine_iterations: 3
+  max_critic_iterations: 2
+  min_genes: 30
+  max_genes: 50
 ```
 
-### CLI Overrides
+Key parameters:
 
-All config options can be overridden via CLI:
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `phase1.max_processes` | 15 | Upper bound on biological processes per hallmark |
+| `phase2.max_research_iterations` | 7 | ReAct research iterations per process |
+| `phase2.max_critic_iterations` | 2 | Critic/refine cycles per process |
+| `phase2.min_genes` / `max_genes` | 30 / 50 | Target gene count per process |
+
+## Running experiments
+
+The pipeline is designed for SLURM. The standard flow — Phase 1, then a Phase 2 array
+with one task per biological process, then aggregation — is orchestrated by a single
+submission:
 
 ```bash
-python -m aging_bd_agentic_system.main \
-    --config config/test_config.yaml \
-    --provider openai \
-    --model gpt-4o-mini \
-    --max-research-iterations 3
+sbatch jobs/run_test_expt.sh config/my_experiment.yaml
 ```
 
-See [.env.example](.env.example) for all available options.
+This runs Phase 1, reads the process count from `processes.tsv`, submits the Phase 2
+array throttled to five concurrent tasks, and submits aggregation with an `afterok`
+dependency on the array.
 
-## Usage
+### Replicates
 
-### Basic Usage
+To assess reproducibility, submit N independent replicates of a config, each writing to
+its own output directory:
 
 ```bash
-# Run with defaults (OpenAI gpt-4o)
-python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations"
-
-# Run with Vertex AI
-python -m aging_bd_agentic_system.main --hallmark "epigenetic alterations" --provider vertex --model gemini-2.0-flash-exp-01-21
+sh jobs/run_replicates.sh config/my_experiment.yaml 3
 ```
 
-### Available Hallmarks
+### Manual and local runs
 
-The 9 aging hallmarks from López-Otín et al.:
-
-| Hallmark | Description |
-|----------|-------------|
-| `genomic instability` | DNA damage accumulation |
-| `telomere attrition` | Telomere shortening |
-| `epigenetic alterations` | DNA methylation, histone changes |
-| `loss of proteostasis` | Protein folding/maintenance |
-| `deregulated nutrient sensing` | IGF-1, mTOR, AMPK pathways |
-| `mitochondrial dysfunction` | Mitochondrial efficiency decline |
-| `cellular senescence` | Cell cycle arrest |
-| `stem cell exhaustion` | Stem cell depletion |
-| `altered intercellular communication` | Inflammation, signaling changes |
-
-### Custom Output Directory
+The individual stages can be run directly, for example on a single process:
 
 ```bash
-python -m aging_bd_agentic_system.main \
-    --hallmark "epigenetic alterations" \
-    --output-dir /path/to/outputs
+python run_scripts/run_phase1.py --config config/my_experiment.yaml
+python run_scripts/run_phase2_bp.py --bp-rank 3 --config config/my_experiment.yaml
+python run_scripts/run_aggregation.py --config config/my_experiment.yaml --k-threshold 0.5
 ```
 
-## Output Format
+Phase 2 requires that Phase 1 has completed: it reads the process name for the given
+`--bp-rank` (1-indexed) from `processes.tsv` and the Phase 1 state from `full_state.json`.
+
+## Outputs
 
 ```
-outputs/epigenetic_alterations/
-├── processes.tsv           # 10-15 biological processes
-├── genes.tsv               # 300-500 curated genes
-├── go_terms.tsv            # 50-80 GO term mappings
-└── full_state.json         # Complete workflow state
+outputs/<hallmark>/
+  processes.tsv          Phase 1: ranked biological processes
+  full_state.json        Complete Phase 1 state (consumed by Phase 2)
+  bp<n>/                 Per-process artifacts
+    seed_genes.json
+    gene_evidence.json
+    state_of_knowledge.json
+    critic_review.json
+    refinement_history.json
+    scored_genes.tsv     Final scored genes for this process
+    full_result.json     Complete Phase 2 state for this process
+  hallmark_genes.tsv     Aggregated, ranked hallmark-level gene table
 ```
 
-### processes.tsv
+### `hallmark_genes.tsv`
 
 | Column | Description |
 |--------|-------------|
-| rank | Process priority (1-15) |
-| process_name | Biological process name |
-| evidence_score | Quality score (1-10) |
-| evidence_summary | Summary of evidence |
-| sources | Source citations (PMID, GenAge, etc.) |
-
-### genes.tsv
-
-| Column | Description |
-|--------|-------------|
-| rank | Gene priority (1-500) |
-| gene_symbol | HGNC gene symbol |
-| score | Relevance score (1-10) |
-| biological_process | Associated process |
-| evidence_summary | Summary of evidence |
-| sources | Source citations |
-
-### go_terms.tsv
-
-| Column | Description |
-|--------|-------------|
-| go_id | GO identifier (GO:XXXXXXX) |
-| go_label | GO term name |
-| biological_process | Associated processes |
-| definition | GO term definition |
-| sources | Source citations |
-
-## Project Structure
-
-```
-aging_bd_agentic_system/
-├── src/aging_bd_agentic_system/
-│   ├── main.py              # CLI entry point
-│   ├── agents/              # Phase 1 & 2 node implementations
-│   ├── graph/               # LangGraph workflow definitions
-│   ├── llm/                 # Vertex AI Gemini integration
-│   ├── tools/               # Evidence source tools (5 tools)
-│   ├── observability/       # Tracing and logging
-│   └── utils/               # Validation, aggregation, output
-├── tests/                   # Unit and integration tests
-├── scripts/                 # Corpus ingestion scripts
-├── data/                    # Databases, corpus, GO ontology
-├── logs/                    # Execution logs per hallmark
-├── outputs/                 # Generated outputs per hallmark
-└── docs/                    # Documentation
-```
-
-See [docs/project-structure.md](docs/project-structure.md) for details.
+| `rank` | Rank by evidence score |
+| `gene_symbol` | HGNC gene symbol |
+| `max_score` | Highest score across the processes the gene appears in |
+| `mean_score` | Mean score across those processes |
+| `bp_count` | Number of biological processes the gene appears in |
+| `hallmark_core` | True if the gene recurs in more than `k_threshold` of the processes |
+| `biological_processes` | Processes the gene was found in |
+| `sources` | Evidence citations |
+| `evidence_summary` | Synthesized evidence summary |
 
 ## Observability
 
-### Two-Tier Logging
+Each run writes a two-tier audit trail under `logs/<hallmark>/`: per-call traces
+(LLM calls, tool calls, chain steps) and higher-level audit events (process completion,
+workflow completion). Combined with the per-process JSON snapshots in the output tree,
+every result is traceable back to the evidence and model calls that produced it.
 
-```
-logs/{hallmark}/
-├── trace_{timestamp}.jsonl    # Tier 1: Per-call traces (LLM, tools, chains)
-├── trace_{timestamp}.json     # Tier 1: Complete trace summary
-└── audit.jsonl                # Tier 2: Major events (BP/workflow completion)
-```
-
-### Trace Events
-
-- `llm_start`, `llm_end`, `llm_error`
-- `tool_start`, `tool_end`, `tool_error`
-- `chain_start`, `chain_end`, `chain_error`
-
-### Audit Events
-
-- `bp_research_complete` - When a biological process finishes
-- `workflow_complete` - When the entire workflow finishes
-
-## Development
-
-### Running Tests
+## Testing
 
 ```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run specific test categories
-python -m pytest tests/test_phase4_integration.py -v
-
-# Run with coverage
-python -m pytest tests/ -v --cov=src/aging_bd_agentic_system
+make test                          # full suite
+uv run pytest tests/test_phase4_integration.py
 ```
 
-### Test Categories
+The suite covers the five evidence tools, the LLM client, observability, the aggregation
+and validation utilities, and the workflow graph and routing.
 
-| Test File | Coverage |
-|-----------|----------|
-| `test_genage.py` | GenAge database queries |
-| `test_opengenes.py` | OpenGenes database queries |
-| `test_pubmed.py` | PubMed API integration |
-| `test_vector_db.py` | FAISS corpus search |
-| `test_go_terms.py` | GO term lookup |
-| `test_llm.py` | LLM client and prompts |
-| `test_tracing.py` | Observability/tracing |
-| `test_phase3_utils.py` | Validation, aggregation, output |
-| `test_phase4_integration.py` | Workflow graph, routing, state |
+## Data sources and acknowledgments
 
-## Documentation
-
-- [PRD.md](docs/PRD.md) - Product requirements
-- [RUNBOOK.md](docs/RUNBOOK.md) - Operations runbook
-- [project-structure.md](docs/project-structure.md) - Project structure
-- [plans/](docs/plans/) - Implementation phase plans
-- [ctx_patterns/](docs/ctx_patterns/) - Context management patterns and lessons learned
-
-## Troubleshooting
-
-### Common Issues
-
-| Issue | Solution |
-|-------|----------|
-| `OPENAI_API_KEY not set` | Add to `.env` file |
-| `VERTEX_PROJECT_ID not set` | Add to `.env` file (only if using Vertex AI) |
-| `Credentials not found` | Run `gcloud auth application-default login` (Vertex AI only) |
-| `No biological processes` | Check LLM errors in trace logs |
-| `Empty gene list` | Verify GenAge/OpenGenes data files exist |
-| `PubMed rate limited` | Add `NCBI_API_KEY` to `.env` |
-
-See [RUNBOOK.md](docs/RUNBOOK.md) for detailed troubleshooting.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests (`python -m pytest tests/ -v`)
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+- López-Otín et al. (2022), *Hallmarks of Aging: An Expanding Universe*, Cell.
+- GenAge — database of aging-related genes.
+- OpenGenes — database of longevity-associated genes.
+- Gene Ontology.
+- LangGraph for workflow orchestration; Vertex AI for model inference.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [López-Otín et al. (2022)](https://www.cell.com/cell/fulltext/S0092-8674(22)01377-0) - Hallmarks of aging: An expanding universe
-- [GenAge](https://genomics.senescence.info/genes/) - Database of aging-related genes
-- [OpenGenes](https://open-genes.com/) - Database of longevity-associated genes
-- [Gene Ontology](https://geneontology.org/) - GO term definitions and relationships
-- [LangGraph](https://github.com/langchain-ai/langgraph) - Workflow orchestration framework
-- [Vertex AI](https://cloud.google.com/vertex-ai) - LLM infrastructure
+MIT. See [LICENSE](LICENSE).

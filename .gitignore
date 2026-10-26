@@ -69,9 +69,12 @@ logs/
 data/
 notebooks/
 
-# misc 
+# Scratch space for experiments / explorations — never tracked
+subprojects/
+
+# misc
 #docs/
-AGENTS.md 
+AGENTS.md
 CHANGELOG_INTERNAL.md 
 
 # slurm scripts 

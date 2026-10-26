@@ -160,6 +160,23 @@ def bp_loop_route(state: dict[str, Any]) -> str:
     return "select_bp"
 
 
+def should_continue_critic_refine(state: dict[str, Any]) -> str:
+    """Route after Phase 2 refine in the full per-BP graph.
+
+    - If critic/refine budget remains -> phase2_critic (another review cycle)
+    - If budget exhausted -> map_go_terms (finalize this BP)
+
+    Mirrors phase2_refine_critic_route but finalizes via map_go_terms instead of
+    END, since the full per-BP graph still has GO mapping to run.
+    """
+    cfg = state.get("config", {})
+    max_iterations = cfg.get("phase2", {}).get("max_critic_iterations", 2)
+    current_iteration = state.get("critic_iteration", 0)
+    if current_iteration >= max_iterations:
+        return "map_go_terms"
+    return "phase2_critic"
+
+
 def build_phase2_graph() -> StateGraph:
     """Build Phase 2 subgraph for per-BP gene research."""
     builder: StateGraph = StateGraph(ResearchState)
@@ -175,7 +192,7 @@ def build_phase2_graph() -> StateGraph:
     # Add conditional edge for research loop (continues until max iterations reached)
     builder.add_conditional_edges(
         "phase2_research",
-        phase2_research_route,
+        phase2_research_critic_route,
         {"phase2_research": "phase2_research", "phase2_critic": "phase2_critic"},
     )
     # Critic routes: pass -> map_go_terms, fail -> phase2_refine

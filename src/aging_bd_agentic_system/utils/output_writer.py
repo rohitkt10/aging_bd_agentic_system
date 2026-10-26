@@ -76,6 +76,13 @@ def write_genes_tsv(out_dir: Path, genes: list[dict[str, Any]]) -> Path:
     return path
 
 
+def write_hallmark_genes_tsv(out_dir: Path, df: Any) -> Path:
+    """Write aggregated hallmark-level gene table to hallmark_genes.tsv."""
+    path = out_dir / "hallmark_genes.tsv"
+    df.to_csv(path, sep="\t", index=False)
+    return path
+
+
 def write_go_terms_tsv(out_dir: Path, go_terms: list[dict[str, Any]]) -> Path:
     """Write GO terms to go_terms.tsv."""
     path = out_dir / "go_terms.tsv"

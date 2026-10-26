@@ -272,6 +272,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     vector_db_top_k = p2.get("phase2_vector_db_top_k", 10)
     pubmed_retmax = p2.get("phase2_pubmed_retmax", 10)
     summarize_max_tokens = p2.get("phase2_summarize_max_tokens", 100000)
+    min_genes = p2.get("min_genes", 30)
+    max_genes = p2.get("max_genes", 50)
     min_actions_per_iteration = p2.get("min_actions_per_iteration", 2)
     max_actions_per_iteration = p2.get("max_actions_per_iteration", 4)
     all_biological_processes = get_all_biological_processes(cfg.get("output_dir"), hallmark)
@@ -353,7 +355,6 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     # Step 1: Synthesize research priorities (free-form invoke)
     print(f"Summarizing current state of knowledge..")
     llm = get_llm()
-    llm.set_tier("high")
     synthesize_prompt = PHASE2_SYNTHESIZE_PROMPT.format(
         biological_process=bp_name,
         hallmark_name=hallmark,
@@ -366,11 +367,10 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         citations=", ".join(state_of_knowledge.get("citations", [])),
         summary=state_of_knowledge.get("summary", "No summary yet."),
     )
-    research_priorities = llm.invoke(synthesize_prompt)
-    
+    with llm.call(model="high", temp="high"):
+        research_priorities = llm.invoke(synthesize_prompt)
 
     # Step 2: Decide tool calls (structured invoke)
-    llm.set_tier("low")
     decision_schema = {
         "title": "research_decision",
         "type": "object",
@@ -440,7 +440,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
     )
     
     print(f"Deciding on research tool calls..")
-    decisions = llm.invoke_structured(decision_prompt, schema=decision_schema)
+    with llm.call(model="low", temp="low"):
+        decisions = llm.invoke_structured(decision_prompt, schema=decision_schema)
     
     findings_notes = decisions.get('findings_notes')
     if findings_notes is None:
@@ -490,19 +491,20 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             new_findings.append(finding)
             opengenes_findings.append(finding)
 
+    summarizer_schema = {
+        "title": "tool_summary",
+        "type": "object",
+        "properties": {
+            "genes_mentioned": {"type": "array", "items": {"type": "string"}},
+            "key_findings": {"type": "array", "items": {"type": "string"}},
+            "citations": {"type": "array", "items": {"type": "string"}},
+            "relevance_to_process": {"type": "string"},
+        },
+        "required": ["genes_mentioned", "key_findings", "citations", "relevance_to_process"],
+    }
+
     # Summarize OpenGenes results
     if opengenes_findings:
-        summarizer_schema = {
-            "title": "tool_summary",
-            "type": "object",
-            "properties": {
-                "genes_mentioned": {"type": "array", "items": {"type": "string"}},
-                "key_findings": {"type": "array", "items": {"type": "string"}},
-                "citations": {"type": "array", "items": {"type": "string"}},
-                "relevance_to_process": {"type": "string"},
-            },
-            "required": ["genes_mentioned", "key_findings", "citations", "relevance_to_process"],
-        }
         summarizer_system = PHASE2_TOOL_SUMMARIZER_PROMPT.format(
             biological_process=bp_name,
             hallmark_name=hallmark,
@@ -519,7 +521,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
 
                         Summarize these OpenGenes results. Extract genes, key findings about aging mechanisms, and citations (format: opengenes:GENE_SYMBOL)."""
 
-        opengenes_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
+        with llm.call(model="low", temp="low"):
+            opengenes_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
 
     # Process PubMed queries
     print("Collecting and summarizing from PubMed queries..")
@@ -549,7 +552,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
                         {json.dumps(pubmed_findings, indent=2)}
 
                         Summarize these PubMed results. Extract genes mentioned, key findings, and citations (format: pmid:12345678)."""
-        pubmed_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
+        with llm.call(model="low", temp="low"):
+            pubmed_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
 
     # Process Vector DB queries (batched)
     print("Collecting and summarizing from local literature corpus..")
@@ -577,7 +581,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
                         {json.dumps(vectordb_findings, indent=2)}
 
                         Summarize these corpus results. Extract genes mentioned, mechanistic insights, and citations (format: pmid:XXXXX - use the pmid from the source field)."""
-        vectordb_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
+        with llm.call(model="low", temp="low"):
+            vectordb_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
 
     # ===== STEP 5: UPDATE STATE OF KNOWLEDGE =====
     print("Synthesizing findings and updating state of knowledge...")
@@ -634,32 +639,32 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
         vectordb_summary=json.dumps(vectordb_summary, indent=2) if vectordb_summary else "{}",
         gene_evidence_subset=json.dumps(gene_evidence_subset, indent=2),
     )
-    llm.set_tier("high")
     try:
-        state_update = llm.invoke_structured(
-                                state_update_prompt, 
-                                schema=state_update_schema
-                                            )
+        with llm.call(model="high", temp="low"):
+            state_update = llm.invoke_structured(
+                state_update_prompt,
+                schema=state_update_schema,
+            )
         if state_update is None:
             raise ValueError("Structured output returned None")
     except Exception as e:
         print(f"State update structured invoke failed at iteration {current_iteration}. Retrying once.")
         try:
-            state_update = llm.invoke_structured(
-                                    state_update_prompt, 
-                                    schema=state_update_schema
-                                                )
+            with llm.call(model="high", temp="low"):
+                state_update = llm.invoke_structured(
+                    state_update_prompt,
+                    schema=state_update_schema,
+                )
             if state_update is None:
                 raise ValueError("Structured output returned None on retry")
         except Exception as retry_e:
             print(f"State update structured invoke failed again at iteration {current_iteration}. Retaining state of knowledge as is.")
             state_update = {
-                    "new_candidate_genes": [],
-                    "new_citations": [],
-                    "summary": state_of_knowledge.get("summary", "") + f"\n[Note] Iteration {current_iteration}: state update failed after retry; no update applied.",
-                    "gene_evidence_updates": {},
-                        }
-    llm.set_tier("low")
+                "new_candidate_genes": [],
+                "new_citations": [],
+                "summary": state_of_knowledge.get("summary", "") + f"\n[Note] Iteration {current_iteration}: state update failed after retry; no update applied.",
+                "gene_evidence_updates": {},
+            }
 
 
     # Apply updates to state_of_knowledge
@@ -717,6 +722,8 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             all_biological_processes=all_biological_processes,
             research_summary=state_of_knowledge.get("summary", "No summary available."),
             gene_evidence=json.dumps(gene_evidence, indent=2),
+            min_genes=min_genes,
+            max_genes=max_genes,
         )
         scored_genes_schema = {
             "title": "scored_genes_response",
@@ -739,15 +746,14 @@ def phase2_research(state: dict[str, Any]) -> dict[str, Any]:
             "required": ["genes"],
         }
         print("Finalize initial research. Score available genes...")
-        llm.set_tier("high")
         try:
-            response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
+            with llm.call(model="high", temp="low"):
+                response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
             scored_genes = response.get("genes", [])
         except Exception:
             scored_genes = []
         for gene in scored_genes:
             gene["biological_process"] = bp_name
-        llm.set_tier("low")
 
         # Save pre-critic snapshot (research complete, before critic/refine)
         bp_rank = state.get("current_bp_index", 0) + 1  # 1-indexed
@@ -853,9 +859,10 @@ def map_go_terms(state: dict[str, Any]) -> dict[str, Any]:
             },
         }
 
-        scored_terms = llm.invoke_structured(
-            user_context, schema=schema, system_prompt=system_prompt
-        )
+        with llm.call(model="low", temp="low"):
+            scored_terms = llm.invoke_structured(
+                user_context, schema=schema, system_prompt=system_prompt
+            )
 
     except Exception:
         # Fallback: return all terms with default relevance score

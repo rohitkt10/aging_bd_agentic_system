@@ -59,6 +59,10 @@ class Phase2Config:
     # Context management
     phase2_summarize_max_tokens: int = 100000
 
+    # Gene count targets
+    min_genes: int = 30
+    max_genes: int = 50
+
     # Critic-refine loop settings
     max_critic_iterations: int = 2
     refine_opengenes_max_results: int = 15
@@ -81,6 +85,9 @@ class LLMConfig:
     model_high: str | None = None  # If None, uses resolved model_low
 
     temperature: float = 0.7
+    temperature_low: float | None = None
+    temperature_mid: float | None = None
+    temperature_high: float | None = None
     max_tokens: int | None = None
     # Vertex-specific
     vertex_location: str = "us-central1"
@@ -94,6 +101,18 @@ class LLMConfig:
     def get_model_high(self) -> str:
         """Get resolved model_high (model_high if set, else resolved model_low)."""
         return self.model_high if self.model_high else self.get_model_low()
+
+    def get_temperature_low(self) -> float:
+        """Get low temperature (temperature_low if set, else temperature)."""
+        return self.temperature_low if self.temperature_low is not None else self.temperature
+
+    def get_temperature_mid(self) -> float:
+        """Get mid temperature (temperature_mid if set, else temperature)."""
+        return self.temperature_mid if self.temperature_mid is not None else self.temperature
+
+    def get_temperature_high(self) -> float:
+        """Get high temperature (temperature_high if set, else temperature)."""
+        return self.temperature_high if self.temperature_high is not None else self.temperature
 
 
 @dataclass
@@ -198,6 +217,12 @@ class RunConfig:
             self.llm.model_high = kwargs["model_high"]
         if kwargs.get("temperature") is not None:
             self.llm.temperature = kwargs["temperature"]
+        if kwargs.get("temperature_low") is not None:
+            self.llm.temperature_low = kwargs["temperature_low"]
+        if kwargs.get("temperature_mid") is not None:
+            self.llm.temperature_mid = kwargs["temperature_mid"]
+        if kwargs.get("temperature_high") is not None:
+            self.llm.temperature_high = kwargs["temperature_high"]
         if kwargs.get("max_tokens") is not None:
             self.llm.max_tokens = kwargs["max_tokens"]
         if kwargs.get("vertex_location"):
@@ -254,5 +279,9 @@ class RunConfig:
             self.phase2.refine_pubmed_max_results = kwargs["refine_pubmed_max_results"]
         if kwargs.get("refine_vector_db_top_k") is not None:
             self.phase2.refine_vector_db_top_k = kwargs["refine_vector_db_top_k"]
+        if kwargs.get("min_genes") is not None:
+            self.phase2.min_genes = kwargs["min_genes"]
+        if kwargs.get("max_genes") is not None:
+            self.phase2.max_genes = kwargs["max_genes"]
 
         return self

@@ -54,8 +54,8 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
     refine_opengenes_max_results = p2.get("refine_opengenes_max_results", 15)
     refine_pubmed_max_results = p2.get("refine_pubmed_max_results", 10)
     refine_vector_db_top_k = p2.get("refine_vector_db_top_k", 10)
-    min_genes_target = 30
-    max_genes_target = 50
+    min_genes_target = p2.get("min_genes", 30)
+    max_genes_target = p2.get("max_genes", 50)
 
     # Get critic review
     critic_review = state.get("critic_review", {})
@@ -144,11 +144,12 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
         review_recommendations=json.dumps(critic_review.get("recommendations", {}), indent=2),
     )
     try:
-        assessment = llm.invoke_structured(
-            assessment_user_prompt,
-            schema=assessment_schema,
-            system_prompt=REFINEMENT_ASSESSMENT_SYSTEM_PROMPT,
-        )
+        with llm.call(model="high", temp="mid"):
+            assessment = llm.invoke_structured(
+                assessment_user_prompt,
+                schema=assessment_schema,
+                system_prompt=REFINEMENT_ASSESSMENT_SYSTEM_PROMPT,
+            )
 
         # Post-process: Ensure all three query types exist in tool_calls
         # If assessment omitted any, fall back to critic's recommendations for that source
@@ -225,7 +226,8 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
                         Summarize these OpenGenes results. Extract genes, key findings about aging mechanisms, and citations (format: opengenes:GENE_SYMBOL)."""
         try:
             print("Summarizing data retrieved from OpenGenes...")
-            opengenes_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
+            with llm.call(model="low", temp="low"):
+                opengenes_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
             print(f"    OpenGenes: {len(opengenes_summary.get('genes_mentioned', []))} genes found")
         except Exception as e:
             print(f"    OpenGenes summarization failed: {e}")
@@ -256,7 +258,8 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
                     Summarize these PubMed results. Extract genes mentioned, key findings, and citations (format: pmid:12345678)."""
         try:
             print("Summarizing data retrieved from PubMed...")
-            pubmed_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
+            with llm.call(model="low", temp="low"):
+                pubmed_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
             print(f"    PubMed: {len(pubmed_summary.get('genes_mentioned', []))} genes found")
         except Exception as e:
             print(f"    PubMed summarization failed: {e}")
@@ -285,7 +288,8 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
                     Summarize these corpus results. Extract genes mentioned, mechanistic insights, and citations (format: pmid:XXXXX)."""
         try:
             print("Summarizing data retrieved from local vector DB...")
-            vectordb_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
+            with llm.call(model="low", temp="low"):
+                vectordb_summary = llm.invoke_structured(user_prompt, schema=summarizer_schema, system_prompt=summarizer_system)
             print(f"    Vector DB: {len(vectordb_summary.get('genes_mentioned', []))} genes found")
         except Exception as e:
             print(f"    Vector DB summarization failed: {e}")
@@ -346,9 +350,9 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
         vectordb_summary=json.dumps(vectordb_summary, indent=2) if vectordb_summary else "{}",
         gene_evidence_subset=json.dumps(gene_evidence_subset, indent=2),
     )
-    llm.set_tier("high")
     try:
-        state_update = llm.invoke_structured(state_update_prompt, schema=state_update_schema)
+        with llm.call(model="high", temp="low"):
+            state_update = llm.invoke_structured(state_update_prompt, schema=state_update_schema)
 
         # Apply updates to state_of_knowledge
         new_genes = state_update.get("new_candidate_genes", [])
@@ -382,9 +386,7 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
 
     except Exception as e:
         print(f"  Warning: State update failed: {e}")
-    
-    llm.set_tier("low")
-    
+
     # ===== STEP 4: Scoring (separate call, same as phase2_research) =====
     print("  Scoring genes...")
 
@@ -415,11 +417,13 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
         all_biological_processes=all_biological_processes,
         research_summary=state_of_knowledge.get("summary", "No summary available."),
         gene_evidence=json.dumps(gene_evidence, indent=2),
+        min_genes=min_genes_target,
+        max_genes=max_genes_target,
     )
 
-    llm.set_tier("high")
     try:
-        scoring_response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
+        with llm.call(model="high", temp="low"):
+            scoring_response = llm.invoke_structured(scoring_prompt, schema=scored_genes_schema)
         updated_genes = scoring_response.get("genes", [])
         for gene in updated_genes:
             gene["biological_process"] = bp_name
@@ -451,7 +455,6 @@ def phase2_refine(state: dict[str, Any]) -> dict[str, Any]:
                             "sources": summary.get("citations", [])[:2],
                             "biological_process": bp_name,
                         })
-    llm.set_tier("low")
 
     # Build refinement record for audit trail
     old_gene_symbols = {g.get("gene_symbol") for g in genes_found}

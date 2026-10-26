@@ -69,6 +69,7 @@ Select genes from the GenAge database that are relevant to the biological proces
 2. **Be generous**: If there's any plausible connection to the process or hallmark, include it
 3. **Return symbols only**: Output the gene symbols, not the full records
 4. **No minimum/maximum**: Return all relevant genes you find, even if none or many
+5. **Human evidence only**: Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association.
 
 ## Output Format
 
@@ -298,10 +299,16 @@ The research loop progresses through phases:
 Synthesize the above information and output research priorities for this iteration.
 
 Consider:
-1. Which candidate genes need more validation?
-2. What biological themes or mechanisms are underexplored?
-3. What patterns in the data suggest promising leads?
-4. What gaps in evidence should we prioritize?
+1. Which candidate genes have only associative evidence so far — do we have any functional
+   or causal studies to look for?
+2. Which genes might be Essential Drivers (LOF/GOF aging phenotypes in humans) — are we
+   specifically searching for that kind of evidence?
+3. What biological mechanisms or complexes are central to this process but underrepresented?
+4. What gaps in functional evidence (vs. associative evidence) should we prioritize?
+
+Prioritize research directions that could elevate genes from Supporting → Core Mediator
+or Core Mediator → Essential Driver, rather than adding more associative hits for genes
+already in the list.
 
 Output a summary (approximately 500 words) of research priorities. Be specific about what to investigate and why it matters for evidence-based gene curation.
 """
@@ -380,6 +387,13 @@ Search PubMed for recent literature.
 - Include gene names: "TP53 AND senescence"
 - Be specific but not overly narrow
 
+**Prefer queries that find functional evidence:**
+- "GENE AND loss-of-function AND aging"
+- "GENE AND gain-of-function AND lifespan"
+- "GENE AND knockout AND aging phenotype"
+- "PATHWAY AND mechanism AND human"
+Associative queries (expression, GWAS) are lower priority if we already have them.
+
 ### 3. query_vector_db
 Search custom literature corpus for mechanistic insights.
 - **Purpose**: Find detailed mechanistic context from curated literature
@@ -391,6 +405,11 @@ Search custom literature corpus for mechanistic insights.
 - Use natural questions: "What is the role of cytosolic DNA sensing in aging?"
 - Or detailed concepts: "Evidence linking mitochondrial DNA leakage to inflammaging"
 - Avoid short keywords - semantic search works best with context
+
+**Prefer mechanistic questions:**
+- "What is the causal role of GENE in PROCESS?"
+- "Loss-of-function mutations in GENE and aging"
+- "Direct evidence for GENE in human PROCESS"
 
 ## Your Task
 
@@ -459,7 +478,7 @@ which we will essentially label as "core" genes for the hallmark.
 
 ## Your Role
 
-You are the research scientist for Phase 2 gene discovery. You are curating a gene list for a biological process in the context of an aging hallmark.
+You are the research scientist for Phase 2 gene discovery. You are curating a gene list for a biological process in the context of an aging hallmark. Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association.
 
 ## Current Research Task
 
@@ -574,20 +593,37 @@ You are the final gene scorer for Phase 2. Your job is to review the synthesized
 
 ## Scoring Guidelines
 
-**Target output: 30-50 genes per biological process. Maximum 50 genes.**
+**Human evidence only**: Focus exclusively on human evidence; model organism findings
+(mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct
+human evidence supporting the association.
 
-Use the full 5-10 scoring range to discriminate between genes:
-- **9-10**: Exceptional evidence from 3+ sources with direct mechanistic links
-- **7-8**: Strong evidence from 2+ sources (database + literature)
-- **5-6**: Found in at least one source with evidence connecting it to the process
+**Target output: {min_genes}-{max_genes} genes per biological process. Maximum {max_genes} genes.**
 
-**If you have 50+ candidate genes:** Be selective. Prioritize genes with stronger evidence and direct mechanistic relevance. Score marginal cases below 5 to exclude them.
+Score based on the nature and strength of human evidence:
 
-**If you have fewer than 30 candidate genes:** Be inclusive. Include any gene with at least one source and plausible relevance.
+- **9–10 (Essential Driver)**: Direct causal evidence — loss-of-function or gain-of-function
+  studies in humans directly result in aging phenotypes, accelerated age-related disease,
+  or extended lifespan. Mechanistic link is well-characterized.
+
+- **7–8 (Core Mediator)**: Essential functional role — central to a key complex, pathway,
+  or regulatory mechanism. Supported by human functional studies (not just association).
+  Well-characterized role even if direct aging LOF/GOF is lacking.
+
+- **5–6 (Supporting Role)**: Validated involvement — participates in the process but effects
+  are indirect, tissue-specific, or primarily associative (expression changes, GWAS hits
+  without strong functional follow-up).
+
+**If you have {max_genes}+ candidate genes:** Be selective. Prefer Essential Drivers and
+Core Mediators. Downgrade Supporting Role genes below 5 to exclude them unless coverage
+would otherwise be too thin.
+
+**If you have fewer than {min_genes} candidate genes:** Be inclusive. Include any gene
+with at least one source and plausible functional relevance.
 
 **Exclude only:**
 - Genes with NO sources or citations
 - Genes clearly unrelated to the biological process
+- Genes supported only by model organism evidence with no direct human evidence
 
 ## Output Schema
 
@@ -635,6 +671,7 @@ Evaluate gene evidence for biological process: {biological_process}
 1. Count: Should have 20+ genes (for this single process)
 2. Evidence: Each gene must have sources and evidence summary
 3. Relevance: Genes must be directly relevant to the biological process
+4. Human evidence: Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 ## Output Format
 Return ONLY JSON:
@@ -732,6 +769,7 @@ Create an actionability-focused summary that identifies:
 - **Confidence 7-8**: Genes from seeds OR multiple mentions in findings
 - **Confidence 5-6**: Genes with 2-3 supporting findings
 - **Confidence 1-4**: Genes with single/weak findings
+- Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 - **Value Score 9-10**: Critical mechanistic insights, direct links to aging
 - **Value Score 7-8**: Strong supporting evidence, clear relevance
@@ -818,6 +856,8 @@ For each gene, write a brief evidence commentary (~50 words) explaining:
 2. Its role in the biological process: {biological_process}
 3. Why it's relevant to aging in the context of: {hallmark_name}
 
+If the GenAge data indicates a causal or functional role (e.g., LOF mutations, longevity intervention), note this explicitly.
+
 ## Output Format
 
 Return ONLY a JSON object with a "summaries" array:
@@ -871,6 +911,8 @@ For each gene, synthesize all available data into a concise evidence summary (~5
 - GenAge evidence (if present): incorporate into summary
 
 Focus on relevance to the biological process: {biological_process}
+
+If the OpenGenes/GenAge data indicates a causal or functional role (e.g., LOF mutations, longevity intervention), note this explicitly.
 
 ## Output Format
 
@@ -942,6 +984,8 @@ Return ONLY JSON:
 
 IMPORTANT: Process ALL findings. Do not truncate or limit.
 
+Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association.
+
 Return JSON only, no additional text.
 """
 
@@ -996,7 +1040,13 @@ You are the tool result summarizer for Phase 2. Your job is to compress raw data
 
 Extract from the results:
 1. **Genes mentioned** - Any gene symbols found (highlight NEW genes not in candidate list)
-2. **Key findings** - 2-4 bullet points, ~50 words each, focused on evidence relevant to the biological process
+2. **Key findings** - 2-4 bullet points, ~50 words each. For each finding, prefix with
+   the evidence type in brackets:
+   - [CAUSAL]: Direct LOF/GOF studies, disease mutations, lifespan intervention
+   - [FUNCTIONAL]: Essential pathway role, complex membership, enzymatic function
+   - [ASSOCIATIVE]: Expression changes, GWAS hits, correlational studies
+   Example: "[CAUSAL] TP53 germline mutations accelerate aging phenotypes in Li-Fraumeni
+   syndrome patients (pmid:12345)."
 3. **Citations** - CRITICAL: Preserve all source references in proper format
 4. **Relevance** - 1-2 sentences on how this relates to the biological process
 
@@ -1136,7 +1186,12 @@ Synthesize the above and output updates to the state of knowledge.
    - What still needs investigation
    - Patterns or themes emerging across sources
 4. **gene_evidence_updates**: ⚠️ You MUST provide an entry for EVERY gene in `gene_evidence_subset` above. For each gene:
-   - `evidence_notes`: Compressed summary (~50 words) of evidence (replace existing)
+   - `evidence_notes`: Compressed ~50 word summary. Begin with the strongest evidence type
+     for this gene in brackets: [CAUSAL], [FUNCTIONAL], or [ASSOCIATIVE]. This classification
+     is used by the downstream scorer.
+     Example: "[FUNCTIONAL] BRCA1 is essential for homologous recombination DSB repair,
+     forming a core complex with BARD1. Strong human functional evidence from cell lines
+     and BRCA1-mutant patient studies."
    - `new_citations`: ALL citations for this gene from ALL source summaries (OpenGenes + PubMed + VectorDB)
    - `sources_found`: Which sources mentioned this gene (for flag updates)
 
@@ -1169,6 +1224,7 @@ Return ONLY JSON:
 - The summary should be a cohesive narrative, not bullet points
 - ⚠️ `gene_evidence_updates` MUST contain an entry for EVERY gene shown in `gene_evidence_subset`
 - ⚠️ Each gene's `new_citations` must include citations from ALL sources that mentioned it
+- Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 Return JSON only, no additional text.
 """

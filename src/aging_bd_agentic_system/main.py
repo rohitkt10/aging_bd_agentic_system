@@ -116,6 +116,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--refine-vector-db-top-k", type=int, help="Vector DB results per query during refinement"
     )
+    parser.add_argument("--min-genes", type=int, help="Min genes to discover per biological process")
+    parser.add_argument("--max-genes", type=int, help="Max genes to discover per biological process")
 
     return parser.parse_args()
 
@@ -170,6 +172,8 @@ def _print_config(config: RunConfig) -> None:
     print(f"  refine_opengenes_max_results: {p2.get('refine_opengenes_max_results')}")
     print(f"  refine_pubmed_max_results: {p2.get('refine_pubmed_max_results')}")
     print(f"  refine_vector_db_top_k: {p2.get('refine_vector_db_top_k')}")
+    print(f"  min_genes: {p2.get('min_genes')}")
+    print(f"  max_genes: {p2.get('max_genes')}")
 
     print("\n" + "=" * 60 + "\n")
 
@@ -247,6 +251,8 @@ def main() -> None:
         refine_opengenes_max_results=args.refine_opengenes_max_results,
         refine_pubmed_max_results=args.refine_pubmed_max_results,
         refine_vector_db_top_k=args.refine_vector_db_top_k,
+        min_genes=args.min_genes,
+        max_genes=args.max_genes,
     )
 
     # Validate hallmark is set

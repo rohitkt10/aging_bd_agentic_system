@@ -23,9 +23,13 @@ You are a manuscript reviewer conducting a detached quality assessment of a cura
 
 ## Evaluation Criteria
 
-1. **Quantity**: Is the gene count reasonable for this biological process? (Target: 30-50 genes)
+1. **Quantity**: Is the gene count reasonable for this biological process? (Target: {min_genes}-{max_genes} genes)
 2. **Relevance**: Are genes actually relevant to the biological process?
-3. **Evidence Quality**: Are scores justified by the evidence provided?
+3. **Evidence Quality**: Are scores justified by the rubric?
+   - 9–10 (Essential Driver): Must have direct causal human evidence (LOF/GOF → aging phenotype)
+   - 7–8 (Core Mediator): Must have functional human evidence (central pathway/complex role)
+   - 5–6 (Supporting Role): Associative evidence acceptable (expression, GWAS, indirect)
+   Flag any gene scored 9–10 without causal evidence, or 7–8 without functional evidence.
 4. **Coverage**: Are major pathways/mechanisms represented?
 5. **Red Flags**: Any suspicious high scores? Genes that clearly don't belong?
 
@@ -40,9 +44,9 @@ Remember: An extra refinement cycle costs nothing. Publishing a weak list costs 
 
 ## Target Gene Count
 
-The target is 30-50 genes per biological process. This is a guideline, not a hard rule:
-- Fewer than 30: May indicate incomplete coverage (but could be appropriate for narrow processes)
-- More than 50: May indicate over-inclusion (but could be appropriate for broad processes)
+The target is {min_genes}-{max_genes} genes per biological process. This is a guideline, not a hard rule:
+- Fewer than {min_genes}: May indicate incomplete coverage (but could be appropriate for narrow processes)
+- More than {max_genes}: May indicate over-inclusion (but could be appropriate for broad processes)
 
 ## Recommendation Guidelines
 
@@ -79,6 +83,7 @@ If you find yourself wanting to suggest additional research (e.g., "consider add
 - Focus on actionable feedback
 - Do NOT concern yourself with how many review cycles remain
 - Grade "pass" only if you believe the draft needs NO further work
+- Focus exclusively on human evidence; model organism findings (mouse, C. elegans, yeast, etc.) should not drive gene inclusion unless there is direct human evidence supporting the association
 
 Return JSON only, no additional text.
 """
@@ -130,7 +135,7 @@ Review the above draft and provide:
 3. If fail, specific queries that would help improve the draft. Provide atmost 7 queries per source (opengenes/pubmed/vector db)
 
 Remember:
-- Target is 30-50 genes
+- Target is {min_genes}-{max_genes} genes
 - Grade "pass" only if NO further work is needed
 - Provide actionable recommendations for "fail" grades
 

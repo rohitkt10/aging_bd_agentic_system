@@ -35,6 +35,9 @@ def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
     bp_name = state.get("current_bp_name", "").strip()
     hallmark = state.get("hallmark_name", "")
     cfg = state.get("config", {})
+    p2 = cfg.get("phase2", {})
+    min_genes = p2.get("min_genes", 30)
+    max_genes = p2.get("max_genes", 50)
     all_biological_processes = get_all_biological_processes(cfg.get("output_dir"), hallmark)
 
     # Get scored genes for this BP
@@ -61,6 +64,8 @@ def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
         scored_genes_json=json.dumps(genes_found, indent=2),
         gene_evidence_json=json.dumps(gene_evidence, indent=2),
         state_of_knowledge_summary=state_of_knowledge.get("summary", "No summary text available currently."),
+        min_genes=min_genes,
+        max_genes=max_genes,
     )
 
     
@@ -125,9 +130,14 @@ def phase2_critic(state: dict[str, Any]) -> dict[str, Any]:
     llm = get_llm()
     print("Generating review of current draft...")
     try:
-        critic_review = llm.invoke_structured(
-            user_prompt, schema=critic_schema, system_prompt=CRITIC_SYSTEM_PROMPT
+        critic_system_prompt = CRITIC_SYSTEM_PROMPT.format(
+            min_genes=min_genes,
+            max_genes=max_genes,
         )
+        with llm.call(model="high", temp="mid"):
+            critic_review = llm.invoke_structured(
+                user_prompt, schema=critic_schema, system_prompt=critic_system_prompt
+            )
 
         # Post-process: Fix common LLM schema violations
         # Issue 1: recommendations nested inside review instead of top-level

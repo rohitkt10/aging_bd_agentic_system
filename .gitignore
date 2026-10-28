@@ -77,9 +77,10 @@ subprojects/
 AGENTS.md
 CHANGELOG_INTERNAL.md 
 
-# slurm scripts 
+# slurm scripts
 corpus_setup.sh
 run_test_expt.sh
+run_notebook.sh
 jobs/
 tmp.py
 tmp.tsv
